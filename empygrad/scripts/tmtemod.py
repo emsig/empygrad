@@ -346,7 +346,7 @@ can use
 
 import numpy as np
 
-from empygrad.filters import Hankel
+from empymod.filters import Hankel
 from empygrad.kernel import reflections, angle_factor
 from empygrad.utils import (check_model, check_frequency, check_dipole, _strvar,
                            get_off_ang, get_layer_nr, printstartfinish)

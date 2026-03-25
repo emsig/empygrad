@@ -235,9 +235,9 @@ import numpy as np
 import scipy as sp
 from copy import deepcopy as dc
 
-from empygrad.filters import DigitalFilter
+from empymod.filters import DigitalFilter
 from empygrad.model import dipole, dipole_k
-from empygrad.filters import Hankel, Fourier
+from empymod.filters import Hankel, Fourier
 from empygrad.utils import printstartfinish, timedelta, default_timer
 
 __all__ = ['design', 'save_filter', 'load_filter', 'plot_result',

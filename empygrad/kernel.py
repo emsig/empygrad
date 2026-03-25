@@ -47,60 +47,56 @@ def __dir__():
 
 # Wavenumber-frequency domain kernel
 
-@nb.njit(**_numba_setting)
-def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
-               ab, xdirect, msrc, mrec):
-    r"""Calculate wavenumber domain solution.
+def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+                   lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None):
+    r"""Wavenumber-domain solution and optionally its Jacobian w.r.t. horizontal resistivity.
 
-    Return the wavenumber domain solutions `PJ0`, `PJ1`, and `PJ0b`, which have
-    to be transformed with a Hankel transform to the frequency domain.
-    `PJ0`/`PJ0b` and `PJ1` have to be transformed with Bessel functions of
-    order 0 (:math:`J_0`) and 1 (:math:`J_1`), respectively.
+    Calls :func:`greenfct` to obtain the primal Green's functions
+    ``GTM, GTE`` and, when Jacobian arguments are provided, their Jacobians
+    ``jac_GTM, jac_GTE``.  Then applies the same PJ0/PJ1/PJ0b collection step
+    to both the primal and (optionally) the Jacobian outputs.
 
-    This function corresponds loosely to equations 105--107, 111--116,
-    119--121, and 123--128 in [HuTS15]_, and equally loosely to the file
-    `kxwmod.c`.
+    The collection step is linear in ``PTM``/``PTE``, so the Jacobian of
+    each output simply replaces ``PTM``/``PTE`` with ``jac_PTM``/``jac_PTE``
+    in the same formula.
 
-    [HuTS15]_ uses Bessel functions of orders 0, 1, and 2 (:math:`J_0, J_1,
-    J_2`). The implementations of the *Fast Hankel Transform* and the
-    *Quadrature-with-Extrapolation* in :mod:`empygrad.transform` are set-up with
-    Bessel functions of order 0 and 1 only. This is achieved by applying the
-    recurrence formula
+    Parameters
+    ----------
+    zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+    lambd, ab, xdirect, msrc, mrec :
+        Same as the upstream empymod ``wavenumber`` function.
 
-    .. math::
-        :label: wavenumber
+    jac_etaH, jac_etaV : complex ndarray, shape (nfreq, nlayer, nlayer), optional
+        Jacobians from :func:`~empygrad.utils.jac_check_frequency`.
+        When ``None`` (default), the function operates in primal-only mode
+        and returns the same values as the upstream empymod ``wavenumber``.
 
-        J_2(kr) = \frac{2}{kr} J_1(kr) - J_0(kr) \ .
+    Returns
+    -------
+    PJ0, PJ1, PJ0b : complex ndarray, shape (nfreq, noff, nlambda) or None
+        Primal wavenumber-domain outputs.
 
-
-    .. note::
-
-        `PJ0` and `PJ0b` could theoretically be added here into one, and then
-        be transformed in one go.  However, `PJ0b` has to be multiplied by
-        :func:`ang_fact` later. This has to be done after the Hankel transform
-        for methods which make use of spline interpolation, in order to work
-        for offsets that are not in line with each other.
-
-    This function is called from one of the Hankel functions in
-    :mod:`empygrad.transform`.  Consult the modelling routines in
-    :mod:`empygrad.model` for a description of the input and output parameters.
-
-    If you are solely interested in the wavenumber-domain solution you can call
-    this function directly. However, you have to make sure all input arguments
-    are correct, as no checks are carried out here.
-
+    jac_PJ0, jac_PJ1, jac_PJ0b : complex ndarray, shape (nfreq, noff, nlambda, nlayer) or None
+        Jacobians of the wavenumber outputs w.r.t. ``res``.
+        Only returned when ``jac_etaH`` is not ``None``.
+        Same sparsity as their primal counterparts (``None`` when the
+        corresponding Bessel-function term is absent for the chosen ``ab``).
     """
-    nfreq, _ = etaH.shape
+    nfreq, nlayer = etaH.shape
     noff, nlambda = lambd.shape
 
-    # ** CALCULATE GREEN'S FUNCTIONS
-    # Shape of PTM, PTE: (nfreq, noffs, nfilt)
-    PTM, PTE = greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH,
-                        zetaV, lambd, ab, xdirect, msrc, mrec)
+    jac_mode = jac_etaH is not None
 
-    # ** AB-SPECIFIC COLLECTION OF PJ0, PJ1, AND PJ0b
+    # ** PRIMAL (+ optionally JACOBIAN) from greenfct
+    _gfct = greenfct(
+        zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+        lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV)
+    if jac_mode:
+        PTM, PTE, jac_PTM, jac_PTE = _gfct
+    else:
+        PTM, PTE = _gfct
 
-    # Pre-allocate output
+    # ** PRIMAL pre-allocation (mirrors upstream wavenumber exactly)
     if ab in [11, 22, 24, 15, 33]:
         PJ0 = np.zeros_like(PTM)
     else:
@@ -115,335 +111,612 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
         PJ1 = None
     Ptot = np.zeros_like(PTM)
 
-    # Calculate Ptot which is used in all cases
+    # ** JACOBIAN pre-allocation (extra n_params axis = jac_etaH.shape[2])
+    if jac_mode:
+        dtype = etaH.dtype
+        n_params = jac_etaH.shape[2]
+        if ab in [11, 22, 24, 15, 33]:
+            jac_PJ0 = np.zeros((nfreq, noff, nlambda, n_params), dtype=dtype)
+        else:
+            jac_PJ0 = None
+        if ab in [11, 12, 21, 22, 14, 24, 15, 25]:
+            jac_PJ0b = np.zeros((nfreq, noff, nlambda, n_params), dtype=dtype)
+        else:
+            jac_PJ0b = None
+        if ab not in [33, ]:
+            jac_PJ1 = np.zeros((nfreq, noff, nlambda, n_params), dtype=dtype)
+        else:
+            jac_PJ1 = None
+
+    # ** Ptot = (PTM + PTE) / (4*pi)  [primal loop mirrors upstream wavenumber]
     fourpi = 4*np.pi
     for i in range(nfreq):
         for ii in range(noff):
             for iv in range(nlambda):
                 Ptot[i, ii, iv] = (PTM[i, ii, iv] + PTE[i, ii, iv])/fourpi
 
-    # If rec is magnetic switch sign (reciprocity MM/ME => EE/EM).
+    if jac_mode:
+        # Jacobian: linear, so same formula with PTM/PTE -> jac_PTM/jac_PTE
+        # jac_Ptot shape (nfreq, noff, nlambda, nlayer)
+        jac_Ptot = (jac_PTM + jac_PTE) / fourpi
+
+        # lambd broadcasted for vectorised Jacobian assembly:
+        # lambd (noff, nlambda) -> (1, noff, nlambda, 1) to match jac_Ptot/jac_PTM
+        lam  = lambd[np.newaxis, :, :, np.newaxis]   # (1, noff, nlambda, 1)
+
+    # Sign for magnetic receivers (same as upstream wavenumber)
     if mrec:
         sign = -1
     else:
         sign = 1
 
-    # Group into PJ0 and PJ1 for J0/J1 Hankel Transform
-    if ab in [11, 12, 21, 22, 14, 24, 15, 25]:    # Eqs 105, 106, 111, 112,
-        # J2(kr) = 2/(kr)*J1(kr) - J0(kr)         #     119, 120, 123, 124
+    # ** AB-SPECIFIC COLLECTION (mirrors upstream wavenumber control flow)
+    if ab in [11, 12, 21, 22, 14, 24, 15, 25]:
         if ab in [14, 22]:
             sign *= -1
 
+        # Primal (loop)
         for i in range(nfreq):
             for ii in range(noff):
                 for iv in range(nlambda):
                     PJ0b[i, ii, iv] = sign/2*Ptot[i, ii, iv]*lambd[ii, iv]
-                    PJ1[i, ii, iv] = -sign*Ptot[i, ii, iv]
+                    PJ1[i, ii, iv]  = -sign*Ptot[i, ii, iv]
+
+        if jac_mode:
+            # Jacobian (vectorised; lam broadcasts over nfreq and nlayer)
+            jac_PJ0b[:] = (sign/2) * jac_Ptot * lam
+            jac_PJ1[:]  =  -sign   * jac_Ptot
 
         if ab in [11, 22, 24, 15]:
             if ab in [22, 24]:
                 sign *= -1
 
             eightpi = sign*8*np.pi
+
+            # Primal (loop)
             for i in range(nfreq):
                 for ii in range(noff):
                     for iv in range(nlambda):
                         PJ0[i, ii, iv] = PTM[i, ii, iv] - PTE[i, ii, iv]
                         PJ0[i, ii, iv] *= lambd[ii, iv]/eightpi
 
-    elif ab in [13, 23, 31, 32, 34, 35, 16, 26]:  # Eqs 107, 113, 114, 115,
-        if ab in [34, 26]:                        # .   121, 125, 126, 127
+            if jac_mode:
+                # Jacobian
+                jac_PJ0[:] = (jac_PTM - jac_PTE) * lam / eightpi
+
+    elif ab in [13, 23, 31, 32, 34, 35, 16, 26]:
+        if ab in [34, 26]:
             sign *= -1
+
+        # Primal (loop)
         for i in range(nfreq):
             for ii in range(noff):
                 for iv in range(nlambda):
                     dlambd = lambd[ii, iv]*lambd[ii, iv]
                     PJ1[i, ii, iv] = sign*Ptot[i, ii, iv]*dlambd
 
-    elif ab in [33, ]:                            # Eq 116
+        if jac_mode:
+            # Jacobian
+            jac_PJ1[:] = sign * jac_Ptot * lam**2
+
+    elif ab in [33, ]:
+        # Primal (loop)
         for i in range(nfreq):
             for ii in range(noff):
                 for iv in range(nlambda):
                     tlambd = lambd[ii, iv]*lambd[ii, iv]*lambd[ii, iv]
                     PJ0[i, ii, iv] = sign*Ptot[i, ii, iv]*tlambd
 
-    # Return PJ0, PJ1, PJ0b
+        if jac_mode:
+            # Jacobian
+            jac_PJ0[:] = sign * jac_Ptot * lam**3
+
+    if jac_mode:
+        return PJ0, PJ1, PJ0b, jac_PJ0, jac_PJ1, jac_PJ0b
     return PJ0, PJ1, PJ0b
 
 
-@nb.njit(**_numba_setting)
-def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
-             ab, xdirect, msrc, mrec):
-    r"""Calculate Green's function for TM and TE.
+def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+             lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None):
+    r"""Green's function and optionally its Jacobian w.r.t. horizontal resistivity.
 
-    .. math::
-        :label: greenfct
+    Propagates the resistivity Jacobians ``jac_etaH`` and ``jac_etaV``
+    (from :func:`~empygrad.utils.jac_check_frequency`) through the Gamma,
+    reflection, field-propagator, and ab-factor steps to produce the
+    Jacobians of ``GTM`` and ``GTE``.
 
-        \tilde{g}^{tm}_{hh}, \tilde{g}^{tm}_{hz},
-        \tilde{g}^{tm}_{zh}, \tilde{g}^{tm}_{zz},
-        \tilde{g}^{te}_{hh}, \tilde{g}^{te}_{zz}
+    Parameters
+    ----------
+    zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+    lambd, ab, xdirect, msrc, mrec :
+        Same as the upstream empymod ``greenfct`` function.
 
-    This function corresponds to equations 108--110, 117/118, 122; 89--94,
-    A18--A23, B13--B15; 97--102 A26--A31, and B16--B18 in [HuTS15]_, and
-    loosely to the corresponding files `Gamma.F90`, `Wprop.F90`, `Ptotalx.F90`,
-    `Ptotalxm.F90`, `Ptotaly.F90`, `Ptotalym.F90`, `Ptotalz.F90`, and
-    `Ptotalzm.F90`.
+    jac_etaH : complex ndarray, shape (nfreq, nlayer, nlayer), optional
+        Jacobian of ``etaH`` w.r.t. ``res``.
+        ``jac_etaH[i, j, k] = d(etaH[i, j]) / d(res[k])``.
+        When ``None`` (default), the function operates in primal-only mode
+        and returns the same values as the upstream empymod ``greenfct``.
 
-    The Green's functions are multiplied according to Eqs 105-107, 111-116,
-    119-121, 123-128; with the factors inside the integrals.
+    jac_etaV : complex ndarray, shape (nfreq, nlayer, nlayer), optional
+        Jacobian of ``etaV`` w.r.t. ``res`` (equals ``jac_etaH`` for the
+        isotropic case; ``d_zetaH = 0`` so it is not needed here).
 
-    This function is called from the function :func:`wavenumber`.
+    Returns
+    -------
+    GTM, GTE : complex ndarray, shape (nfreq, noff, nlambda)
+        Primal Green's functions.
 
+    jac_GTM, jac_GTE : complex ndarray, shape (nfreq, noff, nlambda, nlayer)
+        Jacobians of the Green's functions w.r.t. ``res``.
+        Only returned when ``jac_etaH`` is not ``None``.
+        ``jac_GTM[i, ii, iv, k] = d(GTM[i, ii, iv]) / d(res[k])``.
     """
     nfreq, nlayer = etaH.shape
     noff, nlambda = lambd.shape
 
-    # GTM/GTE have shape (frequency, offset, lambda).
-    # gamTM/gamTE have shape (frequency, offset, layer, lambda):
+    jac_mode = jac_etaH is not None
+
+    if jac_mode:
+        nlayer_res = jac_etaH.shape[2]
+
+        # Save pre-swap values for jac_Gam computation.
+        # In the MM branch (mrec and msrc), zetaH -> -etaH_orig, etaH -> -zetaH_orig,
+        # etaV -> -zetaV_orig, and jac_etaH / jac_etaV are zeroed.  The
+        # pre-swap values are needed to reproduce the correct Gam derivative.
+        zetaH_for_gam = zetaH
+        jac_etaH_for_gam = jac_etaH
+        etaH_for_gam = etaH
+        etaV_for_gam = etaV
+        jac_etaV_for_gam = jac_etaV
 
     # Reciprocity switches for magnetic receivers
     if mrec:
-        if msrc:  # If src is also magnetic, switch eta and zeta (MM => EE).
-            # G^mm_ab(s, r, e, z) = -G^ee_ab(s, r, -z, -e)
+        if msrc:
+            # G^mm_ab(s,r,e,z) = -G^ee_ab(s,r,-z,-e): swap eta<->zeta, negate
             etaH, zetaH = -zetaH, -etaH
             etaV, zetaV = -zetaV, -etaV
-        else:  # If src is electric, swap src and rec (ME => EM).
-            # G^me_ab(s, r, e, z) = -G^em_ba(r, s, e, z)
+            if jac_mode:
+                # d(-zetaH)/d(res) = 0  and  d(-zetaV)/d(res) = 0
+                jac_etaH = np.zeros((nfreq, nlayer, nlayer_res), dtype=etaH.dtype)
+                jac_etaV = np.zeros_like(jac_etaH)
+        else:
+            # G^me_ab(s,r,e,z) = -G^em_ba(r,s,e,z): swap src<->rec positions
             zsrc, zrec = zrec, zsrc
             lsrc, lrec = lrec, lsrc
 
     for TM in [True, False]:
-
-        # Continue if Green's function not required
         if TM and ab in [16, 26]:
             continue
         elif not TM and ab in [13, 23, 31, 32, 33, 34, 35]:
             continue
 
-        # Define eta/zeta depending if TM or TE
         if TM:
-            e_zH, e_zV, z_eH = etaH, etaV, zetaH   # TM: zetaV not used
+            e_zH, e_zV, z_eH = etaH, etaV, zetaH
+            if jac_mode:
+                jac_e_zH_loop = jac_etaH
         else:
-            e_zH, e_zV, z_eH = zetaH, zetaV, etaH  # TE: etaV not used
+            e_zH, e_zV, z_eH = zetaH, zetaV, etaH
+            if jac_mode:
+                jac_e_zH_loop = np.zeros((nfreq, nlayer, nlayer_res), dtype=etaH.dtype)
 
-        # Uppercase gamma
-        Gam = np.zeros((nfreq, noff, nlayer, nlambda), etaH.dtype)
+        # Primal Gam (mirrors upstream greenfct exactly)
+        Gam = np.zeros((nfreq, noff, nlayer, nlambda), dtype=etaH.dtype)
         for i in range(nfreq):
             for ii in range(noff):
                 for iii in range(nlayer):
-                    h_div_v = e_zH[i, iii]/e_zV[i, iii]
-                    h_times_h = z_eH[i, iii]*e_zH[i, iii]
+                    h_div_v = e_zH[i, iii] / e_zV[i, iii]
+                    h_times_h = z_eH[i, iii] * e_zH[i, iii]
                     for iv in range(nlambda):
-                        l2 = lambd[ii, iv]*lambd[ii, iv]
-                        Gam[i, ii, iii, iv] = np.sqrt(h_div_v*l2 + h_times_h)
+                        Gam[i, ii, iii, iv] = np.sqrt(
+                            h_div_v * lambd[ii, iv] ** 2 + h_times_h)
 
-        # Gamma in receiver layer
-        lrecGam = Gam[:, :, lrec, :]
+        if jac_mode:
+            # jac_Gam: d(Gam)/d(param), shape (nfreq, noff, nlayer, nlambda, nlayer_res)
+            #
+            # Gam^2 = (e_zH/e_zV)*lambd^2 + z_eH*e_zH
+            #
+            # TM non-MM: e_zH=etaH, e_zV=etaV, z_eH=zetaH
+            #   d(Gam^2)/d(p) = (jac_etaH/etaV - etaH*jac_etaV/etaV^2)*lambd^2
+            #                   + zetaH*jac_etaH
+            #   For isotropic res (jac_etaH=jac_etaV, etaH=etaV): first term=0.
+            #   For aniso (jac_etaH=0): only -etaH*jac_etaV/etaV^2*lambd^2 remains.
+            #
+            # TE or TM-MM: reduces to zetaH_orig*jac_etaH_orig (pre-swap values).
+            #   TE: d(zetaH/zetaV)/d(eta)=0, so d(Gam^2)/d(p) = zetaH*jac_etaH.
+            #   MM (e_zH=-zetaH_orig, jac_e_zH=0): z_eH=-etaH_orig contributes
+            #       d(z_eH*e_zH)/d(p)=-jac_etaH_orig*(-zetaH_orig)=zetaH_orig*jac_etaH_orig.
+            #
+            # Use pre-swap etaH/etaV/jac_etaV so the MM branch is handled correctly.
+            if TM and not (mrec and msrc):
+                lamsq = lambd[np.newaxis, :, np.newaxis, :, np.newaxis] ** 2
+                eH = etaH_for_gam[:, np.newaxis, :, np.newaxis, np.newaxis]
+                eV = etaV_for_gam[:, np.newaxis, :, np.newaxis, np.newaxis]
+                jH = jac_etaH_for_gam[:, np.newaxis, :, np.newaxis, :]
+                jV = jac_etaV_for_gam[:, np.newaxis, :, np.newaxis, :]
+                zH = zetaH_for_gam[:, np.newaxis, :, np.newaxis, np.newaxis]
+                jac_Gam = (
+                    (jH / eV - eH * jV / eV ** 2) * lamsq + zH * jH
+                ) / (2.0 * Gam[:, :, :, :, np.newaxis])
+            else:
+                # TE or TM-MM: pre-swap zetaH*jac_etaH formula.
+                jac_Gam = (
+                    zetaH_for_gam[:, np.newaxis, :, np.newaxis, np.newaxis]
+                    * jac_etaH_for_gam[:, np.newaxis, :, np.newaxis, :]
+                    / (2.0 * Gam[:, :, :, :, np.newaxis])
+                )  # (nfreq, noff, nlayer, nlambda, nlayer_res)
 
-        # Reflection (coming from below (Rp) and above (Rm) rec)
-        if nlayer > 1:  # Only if more than 1 layer
-            Rp, Rm = reflections(depth, e_zH, Gam, lrec, lsrc)
+        lrecGam = Gam[:, :, lrec, :]              # (nfreq, noff, nlambda)
+        if jac_mode:
+            jac_lrecGam = jac_Gam[:, :, lrec, :, :]  # (nfreq, noff, nlambda, nlayer_res)
 
-            # Field propagators
-            # (Up- (Wu) and downgoing (Wd), in rec layer); Eq 74
-            Wu = np.zeros_like(lrecGam)
-            Wd = np.zeros_like(lrecGam)
+        Wu = np.zeros_like(lrecGam)
+        Wd = np.zeros_like(lrecGam)
+        if jac_mode:
+            jac_Wu = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
+            jac_Wd = np.zeros_like(jac_Wu)
 
-            if lrec != nlayer-1:  # No upgoing field prop. if rec in last
-                ddepth = depth[lrec + 1] - zrec
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            Wu[i, ii, iv] = np.exp(-lrecGam[i, ii, iv]*ddepth)
+        if nlayer > 1:
+            if jac_mode:
+                Rp, Rm, jac_Rp, jac_Rm = reflections(
+                    depth, e_zH, Gam, lrec, lsrc, jac_e_zH_loop, jac_Gam)
+            else:
+                Rp, Rm = reflections(depth, e_zH, Gam, lrec, lsrc)
 
-            if lrec != 0:     # No downgoing field propagator if rec in first
-                ddepth = zrec - depth[lrec]
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            Wd[i, ii, iv] = np.exp(-lrecGam[i, ii, iv]*ddepth)
+            if lrec != nlayer - 1:
+                ddu = depth[lrec + 1] - zrec
+                Wu = np.exp(-lrecGam * ddu)
+                if jac_mode:
+                    jac_Wu = -ddu * jac_lrecGam * Wu[:, :, :, np.newaxis]
 
-            # Field at rec level (coming from below (Pu) and above (Pd) rec)
-            Pu, Pd = fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM)
+            if lrec != 0:
+                ddd = zrec - depth[lrec]
+                Wd = np.exp(-lrecGam * ddd)
+                if jac_mode:
+                    jac_Wd = -ddd * jac_lrecGam * Wd[:, :, :, np.newaxis]
 
-        # Green's functions
+            if jac_mode:
+                Pu, Pd, jac_Pu, jac_Pd = fields(
+                    depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
+                    jac_Rp, jac_Rm, jac_Gam)
+            else:
+                Pu, Pd = fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM)
+
         green = np.zeros_like(lrecGam)
-        if lsrc == lrec:  # Rec in src layer; Eqs 108, 109, 110, 117, 118, 122
+        if jac_mode:
+            jac_green = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
 
-            # Green's function depending on <ab>
-            # (If only one layer, no reflections/fields)
+        if lsrc == lrec:
             if nlayer > 1 and ab in [13, 23, 31, 32, 14, 24, 15, 25]:
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            green[i, ii, iv] = Pu[i, ii, iv]*Wu[i, ii, iv]
-                            green[i, ii, iv] -= Pd[i, ii, iv]*Wd[i, ii, iv]
-
+                green = Pu * Wu - Pd * Wd
+                if jac_mode:
+                    jac_green = (
+                        jac_Pu * Wu[:, :, :, np.newaxis]
+                        + Pu[:, :, :, np.newaxis] * jac_Wu
+                        - jac_Pd * Wd[:, :, :, np.newaxis]
+                        - Pd[:, :, :, np.newaxis] * jac_Wd
+                    )
             elif nlayer > 1:
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            green[i, ii, iv] = Pu[i, ii, iv]*Wu[i, ii, iv]
-                            green[i, ii, iv] += Pd[i, ii, iv]*Wd[i, ii, iv]
+                green = Pu * Wu + Pd * Wd
+                if jac_mode:
+                    jac_green = (
+                        jac_Pu * Wu[:, :, :, np.newaxis]
+                        + Pu[:, :, :, np.newaxis] * jac_Wu
+                        + jac_Pd * Wd[:, :, :, np.newaxis]
+                        + Pd[:, :, :, np.newaxis] * jac_Wd
+                    )
 
-            # Direct field, if it is computed in the wavenumber domain
             if not xdirect:
-                ddepth = abs(zsrc - zrec)
+                ddir = abs(zsrc - zrec)
                 dsign = np.sign(zrec - zsrc)
-                minus_ab = [11, 12, 13, 14, 15, 21, 22, 23, 24, 25]
-
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-
-                            # Direct field
-                            directf = np.exp(-lrecGam[i, ii, iv]*ddepth)
-
-                            # Swap TM for certain <ab>
-                            if TM and ab in minus_ab:
-                                directf *= -1
-
-                            # Multiply by zrec-zsrc-sign for certain <ab>
-                            if ab in [13, 14, 15, 23, 24, 25, 31, 32]:
-                                directf *= dsign
-
-                            # Add direct field to Green's function
-                            green[i, ii, iv] += directf
+                directf = np.exp(-lrecGam * ddir)
+                sfact = 1.0
+                if TM and ab in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25]:
+                    sfact = -1.0
+                if ab in [13, 14, 15, 23, 24, 25, 31, 32]:
+                    sfact *= float(dsign)
+                green = green + sfact * directf
+                if jac_mode:
+                    jac_directf = -ddir * jac_lrecGam * directf[:, :, :, np.newaxis]
+                    jac_green = jac_green + sfact * jac_directf
 
         else:
+            ddepth_f = (0.0 if lrec == nlayer - 1
+                        else depth[lrec + 1] - depth[lrec])
+            fexp = np.exp(-lrecGam * ddepth_f)
+            if jac_mode:
+                jac_fexp = -ddepth_f * jac_lrecGam * fexp[:, :, :, np.newaxis]
 
-            # Calculate exponential factor
-            if lrec == nlayer-1:
-                ddepth = 0
-            else:
-                ddepth = depth[lrec+1] - depth[lrec]
+            pmw = (-1 if TM and ab in [11, 12, 13, 21, 22, 23, 14, 24, 15, 25]
+                   else 1)
 
-            fexp = np.zeros_like(lrecGam)
-            for i in range(nfreq):
-                for ii in range(noff):
-                    for iv in range(nlambda):
-                        fexp[i, ii, iv] = np.exp(-lrecGam[i, ii, iv]*ddepth)
+            if lrec < lsrc:
+                Rm0 = Rm[:, :, 0, :]
+                A = Wu + pmw * Rm0 * fexp * Wd
+                green = Pu * A
+                if jac_mode:
+                    jac_Rm0 = jac_Rm[:, :, 0, :, :]
+                    jac_A = (
+                        jac_Wu
+                        + pmw * (
+                            jac_Rm0 * (fexp * Wd)[:, :, :, np.newaxis]
+                            + Rm0[:, :, :, np.newaxis] * jac_fexp * Wd[:, :, :, np.newaxis]
+                            + Rm0[:, :, :, np.newaxis] * fexp[:, :, :, np.newaxis] * jac_Wd
+                        )
+                    )
+                    jac_green = (
+                        jac_Pu * A[:, :, :, np.newaxis]
+                        + Pu[:, :, :, np.newaxis] * jac_A
+                    )
+            else:  # lrec > lsrc
+                idx = abs(lsrc - lrec)
+                Rp_idx = Rp[:, :, idx, :]
+                B = pmw * Wd + Rp_idx * fexp * Wu
+                green = Pd * B
+                if jac_mode:
+                    jac_Rp_idx = jac_Rp[:, :, idx, :, :]
+                    jac_B = (
+                        pmw * jac_Wd
+                        + jac_Rp_idx * (fexp * Wu)[:, :, :, np.newaxis]
+                        + Rp_idx[:, :, :, np.newaxis] * jac_fexp * Wu[:, :, :, np.newaxis]
+                        + Rp_idx[:, :, :, np.newaxis] * fexp[:, :, :, np.newaxis] * jac_Wu
+                    )
+                    jac_green = (
+                        jac_Pd * B[:, :, :, np.newaxis]
+                        + Pd[:, :, :, np.newaxis] * jac_B
+                    )
 
-            # Sign-switch for Green calculation
-            if TM and ab in [11, 12, 13, 21, 22, 23, 14, 24, 15, 25]:
-                pmw = -1
-            else:
-                pmw = 1
-
-            if lrec < lsrc:  # Rec above src layer: Pd not used
-                #              Eqs 89-94, A18-A23, B13-B15
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            green[i, ii, iv] = Pu[i, ii, iv]*(
-                                    Wu[i, ii, iv] + pmw*Rm[i, ii, 0, iv] *
-                                    fexp[i, ii, iv]*Wd[i, ii, iv])
-
-            elif lrec > lsrc:  # rec below src layer: Pu not used
-                #                Eqs 97-102 A26-A30, B16-B18
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            green[i, ii, iv] = Pd[i, ii, iv]*(
-                                    pmw*Wd[i, ii, iv] +
-                                    Rp[i, ii, abs(lsrc-lrec), iv] *
-                                    fexp[i, ii, iv]*Wu[i, ii, iv])
-
-        # Store in corresponding variable
         if TM:
-            gamTM, GTM = Gam, green
+            gamTM = Gam.copy()
+            GTM_pre = green.copy()
+            if jac_mode:
+                jac_gamTM = jac_Gam.copy()
+                jac_GTM_pre = jac_green.copy()
         else:
-            gamTE, GTE = Gam, green
+            gamTE = Gam.copy()
+            GTE_pre = green.copy()
+            if jac_mode:
+                jac_gamTE = jac_Gam.copy()
+                jac_GTE_pre = jac_green.copy()
 
-    # ** AB-SPECIFIC FACTORS AND CALCULATION OF PTOT'S
-    # These are the factors inside the integrals
-    # Eqs 105-107, 111-116, 119-121, 123-128
+    # --- AB-specific scaling (product rule applied to each case) ---
 
     if ab in [11, 12, 21, 22]:
-        for i in range(nfreq):
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTM[i, ii, iv] *= gamTM[i, ii, lrec, iv]/etaH[i, lrec]
-                    GTE[i, ii, iv] *= zetaH[i, lsrc]/gamTE[i, ii, lsrc, iv]
+        # GTM *= gamTM[lrec] / etaH[lrec]
+        gamTM_lr = gamTM[:, :, lrec, :]            # (nfreq, noff, nlambda)
+        eH_lr = etaH[:, lrec]                      # (nfreq,)
+
+        fTM = gamTM_lr / eH_lr[:, np.newaxis, np.newaxis]
+        GTM = GTM_pre * fTM
+        if jac_mode:
+            jgTM_lr = jac_gamTM[:, :, lrec, :, :]     # (nfreq, noff, nlambda, nlayer_res)
+            jeH_lr = jac_etaH[:, lrec, :]             # (nfreq, nlayer_res)
+            jfTM = (
+                jgTM_lr * eH_lr[:, np.newaxis, np.newaxis, np.newaxis]
+                - gamTM_lr[:, :, :, np.newaxis] * jeH_lr[:, np.newaxis, np.newaxis, :]
+            ) / eH_lr[:, np.newaxis, np.newaxis, np.newaxis] ** 2
+            jac_GTM = (jac_GTM_pre * fTM[:, :, :, np.newaxis]
+                       + GTM_pre[:, :, :, np.newaxis] * jfTM)
+
+        # GTE *= zetaH[lsrc] / gamTE[lsrc]
+        gamTE_ls = gamTE[:, :, lsrc, :]
+        zH_ls = zetaH[:, lsrc]                    # (nfreq,)
+
+        fTE = zH_ls[:, np.newaxis, np.newaxis] / gamTE_ls
+        GTE = GTE_pre * fTE
+        if jac_mode:
+            jgTE_ls = jac_gamTE[:, :, lsrc, :, :]
+            jfTE = (
+                -zH_ls[:, np.newaxis, np.newaxis, np.newaxis] * jgTE_ls
+                / gamTE_ls[:, :, :, np.newaxis] ** 2
+            )  # d_zetaH = 0
+            jac_GTE = (jac_GTE_pre * fTE[:, :, :, np.newaxis]
+                       + GTE_pre[:, :, :, np.newaxis] * jfTE)
 
     elif ab in [14, 15, 24, 25]:
-        for i in range(nfreq):
-            fact = etaH[i, lsrc]/etaH[i, lrec]
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTM[i, ii, iv] *= fact*gamTM[i, ii, lrec, iv]
-                    GTM[i, ii, iv] /= gamTM[i, ii, lsrc, iv]
+        # GTM *= (etaH[lsrc]/etaH[lrec]) * gamTM[lrec] / gamTM[lsrc]
+        gamTM_lr = gamTM[:, :, lrec, :]
+        gamTM_ls = gamTM[:, :, lsrc, :]
+        eH_lr = etaH[:, lrec]
+        eH_ls = etaH[:, lsrc]
+
+        f = eH_ls / eH_lr
+        g = gamTM_lr / gamTM_ls
+        fTM = f[:, np.newaxis, np.newaxis] * g
+        GTM = GTM_pre * fTM
+        GTE = GTE_pre
+        if jac_mode:
+            jgTM_lr = jac_gamTM[:, :, lrec, :, :]
+            jgTM_ls = jac_gamTM[:, :, lsrc, :, :]
+            jeH_lr = jac_etaH[:, lrec, :]
+            jeH_ls = jac_etaH[:, lsrc, :]
+            jf = (
+                jeH_ls * eH_lr[:, np.newaxis] - eH_ls[:, np.newaxis] * jeH_lr
+            ) / eH_lr[:, np.newaxis] ** 2
+            jg = (
+                jgTM_lr * gamTM_ls[:, :, :, np.newaxis]
+                - gamTM_lr[:, :, :, np.newaxis] * jgTM_ls
+            ) / gamTM_ls[:, :, :, np.newaxis] ** 2
+            jfTM = (jf[:, np.newaxis, np.newaxis, :] * g[:, :, :, np.newaxis]
+                    + f[:, np.newaxis, np.newaxis, np.newaxis] * jg)
+            jac_GTM = (jac_GTM_pre * fTM[:, :, :, np.newaxis]
+                       + GTM_pre[:, :, :, np.newaxis] * jfTM)
+            jac_GTE = jac_GTE_pre
 
     elif ab in [13, 23]:
-        GTE = np.zeros_like(GTM)
-        for i in range(nfreq):
-            fact = etaH[i, lsrc]/etaH[i, lrec]/etaV[i, lsrc]
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTM[i, ii, iv] *= -fact*gamTM[i, ii, lrec, iv]
-                    GTM[i, ii, iv] /= gamTM[i, ii, lsrc, iv]
+        # GTM *= -etaH[lsrc]/(etaH[lrec]*etaV[lsrc]) * gamTM[lrec]/gamTM[lsrc]
+        GTE = np.zeros_like(GTM_pre)
+
+        gamTM_lr = gamTM[:, :, lrec, :]
+        gamTM_ls = gamTM[:, :, lsrc, :]
+        eH_lr = etaH[:, lrec]
+        eH_ls = etaH[:, lsrc]
+        eV_ls = etaV[:, lsrc]
+
+        denom = eH_lr * eV_ls
+        f = eH_ls / denom
+        g = gamTM_lr / gamTM_ls
+        fTM = -f[:, np.newaxis, np.newaxis] * g
+        GTM = GTM_pre * fTM
+        if jac_mode:
+            jac_GTE = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
+            jgTM_lr = jac_gamTM[:, :, lrec, :, :]
+            jgTM_ls = jac_gamTM[:, :, lsrc, :, :]
+            jeH_lr = jac_etaH[:, lrec, :]
+            jeH_ls = jac_etaH[:, lsrc, :]
+            jeV_ls = jac_etaV[:, lsrc, :]
+            jdenom = (jeH_lr * eV_ls[:, np.newaxis]
+                      + eH_lr[:, np.newaxis] * jeV_ls)
+            jf = (
+                jeH_ls * denom[:, np.newaxis] - eH_ls[:, np.newaxis] * jdenom
+            ) / denom[:, np.newaxis] ** 2
+            jg = (
+                jgTM_lr * gamTM_ls[:, :, :, np.newaxis]
+                - gamTM_lr[:, :, :, np.newaxis] * jgTM_ls
+            ) / gamTM_ls[:, :, :, np.newaxis] ** 2
+            jfTM = -(jf[:, np.newaxis, np.newaxis, :] * g[:, :, :, np.newaxis]
+                     + f[:, np.newaxis, np.newaxis, np.newaxis] * jg)
+            jac_GTM = (jac_GTM_pre * fTM[:, :, :, np.newaxis]
+                       + GTM_pre[:, :, :, np.newaxis] * jfTM)
 
     elif ab in [31, 32]:
-        GTE = np.zeros_like(GTM)
-        for i in range(nfreq):
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTM[i, ii, iv] /= etaV[i, lrec]
+        # GTM /= etaV[lrec]
+        GTE = np.zeros_like(GTM_pre)
+
+        eV_lr = etaV[:, lrec]
+        GTM = GTM_pre / eV_lr[:, np.newaxis, np.newaxis]
+        if jac_mode:
+            jac_GTE = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
+            jeV_lr = jac_etaV[:, lrec, :]
+            jac_GTM = (
+                jac_GTM_pre / eV_lr[:, np.newaxis, np.newaxis, np.newaxis]
+                - GTM_pre[:, :, :, np.newaxis]
+                * jeV_lr[:, np.newaxis, np.newaxis, :]
+                / eV_lr[:, np.newaxis, np.newaxis, np.newaxis] ** 2
+            )
 
     elif ab in [34, 35]:
-        GTE = np.zeros_like(GTM)
-        for i in range(nfreq):
-            fact = etaH[i, lsrc]/etaV[i, lrec]
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTM[i, ii, iv] *= fact/gamTM[i, ii, lsrc, iv]
+        # GTM *= (etaH[lsrc]/etaV[lrec]) / gamTM[lsrc]
+        GTE = np.zeros_like(GTM_pre)
+
+        gamTM_ls = gamTM[:, :, lsrc, :]
+        eH_ls = etaH[:, lsrc]
+        eV_lr = etaV[:, lrec]
+
+        f = eH_ls / eV_lr
+        fTM = f[:, np.newaxis, np.newaxis] / gamTM_ls
+        GTM = GTM_pre * fTM
+        if jac_mode:
+            jac_GTE = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
+            jgTM_ls = jac_gamTM[:, :, lsrc, :, :]
+            jeH_ls = jac_etaH[:, lsrc, :]
+            jeV_lr = jac_etaV[:, lrec, :]
+            jf = (
+                jeH_ls * eV_lr[:, np.newaxis] - eH_ls[:, np.newaxis] * jeV_lr
+            ) / eV_lr[:, np.newaxis] ** 2
+            jfTM = (
+                jf[:, np.newaxis, np.newaxis, :] * gamTM_ls[:, :, :, np.newaxis]
+                - f[:, np.newaxis, np.newaxis, np.newaxis] * jgTM_ls
+            ) / gamTM_ls[:, :, :, np.newaxis] ** 2
+            jac_GTM = (jac_GTM_pre * fTM[:, :, :, np.newaxis]
+                       + GTM_pre[:, :, :, np.newaxis] * jfTM)
 
     elif ab in [16, 26]:
-        GTM = np.zeros_like(GTE)
-        for i in range(nfreq):
-            fact = zetaH[i, lsrc]/zetaV[i, lsrc]
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTE[i, ii, iv] *= fact/gamTE[i, ii, lsrc, iv]
+        # GTE *= (zetaH[lsrc]/zetaV[lsrc]) / gamTE[lsrc]
+        GTM = np.zeros_like(GTE_pre)
 
-    elif ab in [33, ]:
-        GTE = np.zeros_like(GTM)
-        for i in range(nfreq):
-            fact = etaH[i, lsrc]/etaV[i, lsrc]/etaV[i, lrec]
-            for ii in range(noff):
-                for iv in range(nlambda):
-                    GTM[i, ii, iv] *= fact/gamTM[i, ii, lsrc, iv]
+        gamTE_ls = gamTE[:, :, lsrc, :]
+        zH_ls = zetaH[:, lsrc]
+        zV_ls = zetaV[:, lsrc]
 
-    # Return Green's functions
+        f = zH_ls / zV_ls  # d_zetaH = d_zetaV = 0
+        fTE = f[:, np.newaxis, np.newaxis] / gamTE_ls
+        GTE = GTE_pre * fTE
+        if jac_mode:
+            jac_GTM = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
+            jgTE_ls = jac_gamTE[:, :, lsrc, :, :]
+            jfTE = (
+                -f[:, np.newaxis, np.newaxis, np.newaxis] * jgTE_ls
+                / gamTE_ls[:, :, :, np.newaxis] ** 2
+            )
+            jac_GTE = (jac_GTE_pre * fTE[:, :, :, np.newaxis]
+                       + GTE_pre[:, :, :, np.newaxis] * jfTE)
+
+    elif ab in [33]:
+        # GTM *= etaH[lsrc]/(etaV[lsrc]*etaV[lrec]) / gamTM[lsrc]
+        GTE = np.zeros_like(GTM_pre)
+
+        gamTM_ls = gamTM[:, :, lsrc, :]
+        eH_ls = etaH[:, lsrc]
+        eV_ls = etaV[:, lsrc]
+        eV_lr = etaV[:, lrec]
+
+        denom = eV_ls * eV_lr
+        f = eH_ls / denom
+        fTM = f[:, np.newaxis, np.newaxis] / gamTM_ls
+        GTM = GTM_pre * fTM
+        if jac_mode:
+            jac_GTE = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=etaH.dtype)
+            jgTM_ls = jac_gamTM[:, :, lsrc, :, :]
+            jeH_ls = jac_etaH[:, lsrc, :]
+            jeV_ls = jac_etaV[:, lsrc, :]
+            jeV_lr = jac_etaV[:, lrec, :]
+            jdenom = (jeV_ls * eV_lr[:, np.newaxis]
+                      + eV_ls[:, np.newaxis] * jeV_lr)
+            jf = (
+                jeH_ls * denom[:, np.newaxis] - eH_ls[:, np.newaxis] * jdenom
+            ) / denom[:, np.newaxis] ** 2
+            jfTM = (
+                jf[:, np.newaxis, np.newaxis, :] * gamTM_ls[:, :, :, np.newaxis]
+                - f[:, np.newaxis, np.newaxis, np.newaxis] * jgTM_ls
+            ) / gamTM_ls[:, :, :, np.newaxis] ** 2
+            jac_GTM = (jac_GTM_pre * fTM[:, :, :, np.newaxis]
+                       + GTM_pre[:, :, :, np.newaxis] * jfTM)
+
+    else:
+        GTM = GTM_pre
+        GTE = GTE_pre
+        if jac_mode:
+            jac_GTM = jac_GTM_pre
+            jac_GTE = jac_GTE_pre
+
+    if jac_mode:
+        return GTM, GTE, jac_GTM, jac_GTE
     return GTM, GTE
 
 
-@nb.njit(**_numba_with_fm)
-def reflections(depth, e_zH, Gam, lrec, lsrc):
-    r"""Calculate Rp, Rm.
+def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None):
+    r"""Reflection coefficients and optionally their Jacobian w.r.t. horizontal resistivity.
 
-    .. math::
-        :label: reflections
+    Parameters
+    ----------
+    depth, e_zH, Gam, lrec, lsrc : same as the upstream empymod ``reflections``.
 
-        R^\pm_n, \bar{R}^\pm_n
+    jac_e_zH : complex ndarray, shape (nfreq, nlayer, nlayer_res), optional
+        Jacobian of ``e_zH`` w.r.t. ``res``.
+        When ``None`` (default), the function operates in primal-only mode
+        and returns the same values as the upstream empymod ``reflections``.
 
-    This function corresponds to equations 64/65 and A-11/A-12 in
-    [HuTS15]_, and loosely to the corresponding files `Rmin.F90` and
-    `Rplus.F90`.
+    jac_Gam : complex ndarray, shape (nfreq, noff, nlayer, nlambda, nlayer_res), optional
+        Jacobian of ``Gam`` w.r.t. ``res``.
 
-    This function is called from the function :func:`greenfct`.
+    Returns
+    -------
+    Rp, Rm : primal reflection coefficients.
 
+    jac_Rp, jac_Rm : complex ndarray,
+        shape (nfreq, noff, max(lrec,lsrc)-min(lrec,lsrc)+1, nlambda, nlayer_res)
+        Jacobians of Rp and Rm w.r.t. ``res``.
+        Only returned when ``jac_e_zH`` is not ``None``.
     """
-
-    # Get numbers and max/min layer.
     nfreq, noff, nlayer, nlambda = Gam.shape
+    jac_mode = jac_e_zH is not None
+    if jac_mode:
+        nlayer_res = jac_e_zH.shape[2]
     maxl = max([lrec, lsrc])
     minl = min([lrec, lsrc])
 
-    # Loop over Rp, Rm
     for plus in [True, False]:
 
-        # Switches depending if plus or minus
         if plus:
             pm = 1
             layer_count = np.arange(nlayer-2, minl-1, -1)
@@ -455,246 +728,364 @@ def reflections(depth, e_zH, Gam, lrec, lsrc):
             izout = 0
             minmax = pm*minl
 
-        # If rec in last  and rec below src (plus) or
-        # if rec in first and rec above src (minus), shift izout
-        shiftplus = lrec < lsrc and lrec == 0 and not plus
+        shiftplus  = lrec < lsrc and lrec == 0        and not plus
         shiftminus = lrec > lsrc and lrec == nlayer-1 and plus
         if shiftplus or shiftminus:
             izout -= pm
 
-        # Pre-allocate Ref and rloc
         Ref = np.zeros_like(Gam[:, :, :maxl-minl+1, :])
-        rloc = np.zeros_like(Gam[:, :, 0, :])
+        if jac_mode:
+            jac_Ref = np.zeros((nfreq, noff, maxl-minl+1, nlambda, nlayer_res),
+                               dtype=Gam.dtype)
 
-        # Calculate the reflection
         for iz in layer_count:
 
-            # Eqs 65, A-12
-            for i in range(nfreq):
-                ra = e_zH[i, iz+pm]
-                rb = e_zH[i, iz]
-                for ii in range(noff):
-                    for iv in range(nlambda):
-                        rloca = ra*Gam[i, ii, iz, iv]
-                        rlocb = rb*Gam[i, ii, iz+pm, iv]
-                        rloc[i, ii, iv] = (rloca - rlocb)/(rloca + rlocb)
+            # --- primal rloc (eqs 65, A-12) ---
+            e_izpm = e_zH[:, iz+pm]                        # (nfreq,)
+            e_iz   = e_zH[:, iz]                           # (nfreq,)
+            G_izpm = Gam[:, :, iz+pm, :]                  # (nfreq, noff, nlambda)
+            G_iz   = Gam[:, :, iz,    :]                  # (nfreq, noff, nlambda)
 
-            # In first layer tRef = rloc
+            A   = e_izpm[:, np.newaxis, np.newaxis] * G_iz    # (nfreq, noff, nlambda)
+            B   = e_iz[:, np.newaxis, np.newaxis]   * G_izpm
+            ApB = A + B
+            rloc = (A - B) / ApB
+
+            if jac_mode:
+                # --- Jacobian of rloc ---
+                # jac_A[i,ii,iv,k] = jac_e_zH[i,iz+pm,k]*Gam[i,ii,iz,iv]
+                #                   + e_zH[i,iz+pm]*jac_Gam[i,ii,iz,iv,k]
+                je_izpm = jac_e_zH[:, iz+pm, :]               # (nfreq, nlayer_res)
+                je_iz   = jac_e_zH[:, iz,    :]               # (nfreq, nlayer_res)
+                jG_izpm = jac_Gam[:, :, iz+pm, :, :]          # (nfreq, noff, nlambda, nlayer_res)
+                jG_iz   = jac_Gam[:, :, iz,    :, :]          # (nfreq, noff, nlambda, nlayer_res)
+
+                jac_A = (
+                    je_izpm[:, np.newaxis, np.newaxis, :] * G_iz[:, :, :, np.newaxis]
+                    + e_izpm[:, np.newaxis, np.newaxis, np.newaxis] * jG_iz
+                )  # (nfreq, noff, nlambda, nlayer_res)
+                jac_B = (
+                    je_iz[:, np.newaxis, np.newaxis, :] * G_izpm[:, :, :, np.newaxis]
+                    + e_iz[:, np.newaxis, np.newaxis, np.newaxis] * jG_izpm
+                )
+                jac_rloc = 2.0 * (
+                    jac_A * B[:, :, :, np.newaxis] - A[:, :, :, np.newaxis] * jac_B
+                ) / ApB[:, :, :, np.newaxis] ** 2
+
+            # --- initialise or recurse (eqs 64, A-11) ---
             if iz == layer_count[0]:
                 tRef = rloc.copy()
+                if jac_mode:
+                    jac_tRef = jac_rloc.copy()
             else:
-                ddepth = depth[iz+1+pm]-depth[iz+pm]
+                ddepth = depth[iz+1+pm] - depth[iz+pm]
 
-                # Eqs 64, A-11
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            term = tRef[i, ii, iv]*np.exp(
-                                    -2*Gam[i, ii, iz+pm, iv]*ddepth)
-                            tRef[i, ii, iv] = (rloc[i, ii, iv] + term)/(
-                                    1 + rloc[i, ii, iv]*term)
+                E = np.exp(-2.0 * G_izpm * ddepth)    # (nfreq, noff, nlambda)
 
-            # The global reflection coefficient is given back for all layers
-            # between and including src- and rec-layer
+                tRef_old = tRef.copy()
+                term     = tRef_old * E
+
+                G2   = 1.0 + rloc * term                  # (nfreq, noff, nlambda)
+                tRef = (rloc + term) / G2
+
+                if jac_mode:
+                    jac_E = -2.0 * ddepth * jG_izpm * E[:, :, :, np.newaxis]
+                    jac_tRef_old = jac_tRef.copy()
+                    jac_term = (jac_tRef_old * E[:, :, :, np.newaxis]
+                                + tRef_old[:, :, :, np.newaxis] * jac_E)
+                    jac_tRef = (
+                        (1.0 - term[:, :, :, np.newaxis] ** 2) * jac_rloc
+                        + (1.0 - rloc[:, :, :, np.newaxis] ** 2) * jac_term
+                    ) / G2[:, :, :, np.newaxis] ** 2
+
             if lrec != lsrc and pm*iz <= minmax:
-                Ref[:, :, izout, :] = tRef[:]
+                Ref[:, :, izout, :] = tRef
+                if jac_mode:
+                    jac_Ref[:, :, izout, :, :] = jac_tRef
                 izout -= pm
 
-        # If lsrc = lrec, we just store the last values
         if lsrc == lrec and layer_count.size > 0:
             out = np.zeros_like(Ref[:, :, :1, :])
             out[:, :, 0, :] = tRef
+            if jac_mode:
+                jac_out = np.zeros((nfreq, noff, 1, nlambda, nlayer_res),
+                                   dtype=Gam.dtype)
+                jac_out[:, :, 0, :, :] = jac_tRef
         else:
             out = Ref
+            if jac_mode:
+                jac_out = jac_Ref
 
-        # Store Ref in Rm/Rp
         if plus:
             Rp = out
+            if jac_mode:
+                jac_Rp = jac_out
         else:
             Rm = out
+            if jac_mode:
+                jac_Rm = jac_out
 
-    # Return reflections (minus and plus)
+    if jac_mode:
+        return Rp, Rm, jac_Rp, jac_Rm
     return Rp, Rm
 
 
-@nb.njit(**_numba_setting)
-def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM):
-    r"""Calculate Pu+, Pu-, Pd+, Pd-.
+def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
+               jac_Rp=None, jac_Rm=None, jac_Gam=None):
+    r"""Field propagators (Pu, Pd) and optionally their Jacobian w.r.t. horizontal resistivity.
 
-    .. math::
-        :label: fields
+    Parameters
+    ----------
+    depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM : same as the upstream empymod ``fields``.
 
-        P^{u\pm}_s, P^{d\pm}_s, \bar{P}^{u\pm}_s, \bar{P}^{d\pm}_s;
-        P^{u\pm}_{s-1}, P^{u\pm}_n, \bar{P}^{u\pm}_{s-1}, \bar{P}^{u\pm}_n;
-        P^{d\pm}_{s+1}, P^{d\pm}_n, \bar{P}^{d\pm}_{s+1}, \bar{P}^{d\pm}_n
+    jac_Rp, jac_Rm : complex ndarray, optional
+        shape (nfreq, noff, max(lrec,lsrc)-min(lrec,lsrc)+1, nlambda, nlayer_res)
+        Jacobians of Rp and Rm w.r.t. ``res`` (from :func:`reflections`).
+        When ``None`` (default), the function operates in primal-only mode
+        and returns the same values as the upstream empymod ``fields``.
 
-    This function corresponds to equations 81/82, 95/96, 103/104, A-8/A-9,
-    A-24/A-25, and A-32/A-33 in [HuTS15]_, and loosely to the corresponding
-    files `Pdownmin.F90`, `Pdownplus.F90`, `Pupmin.F90`, and `Pdownmin.F90`.
+    jac_Gam : complex ndarray, shape (nfreq, noff, nlayer, nlambda, nlayer_res), optional
+        Jacobian of ``Gam`` w.r.t. ``res``.
 
-    This function is called from the function :func:`greenfct`.
+    Returns
+    -------
+    Pu, Pd : primal field propagators.
 
+    jac_Pu, jac_Pd : complex ndarray, shape (nfreq, noff, nlambda, nlayer_res)
+        Jacobians of Pu and Pd w.r.t. ``res``.
+        Only returned when ``jac_Rp`` is not ``None``.
     """
-
     nfreq, noff, nlayer, nlambda = Gam.shape
+    jac_mode = jac_Rp is not None
+    if jac_mode:
+        nlayer_res = jac_Gam.shape[4]
 
-    # Variables
-    nlsr = abs(lsrc-lrec)+1  # nr of layers btw and incl. src and rec layer
-    rsrcl = 0  # src-layer in reflection (Rp/Rm), first if down
+    nlsr = abs(lsrc - lrec) + 1
+    rsrcl = 0
     izrange = range(2, nlsr)
     isr = lsrc
-    last = nlayer-1
+    last = nlayer - 1
 
-    # Booleans if src in first or last layer; swapped if up=True
     first_layer = lsrc == 0
-    last_layer = lsrc == nlayer-1
+    last_layer = lsrc == nlayer - 1
 
-    # Depths; dp and dm are swapped if up=True
-    if lsrc != nlayer-1:
-        ds = depth[lsrc+1]-depth[lsrc]
-        dp = depth[lsrc+1]-zsrc
-    dm = zsrc-depth[lsrc]
+    if lsrc != nlayer - 1:
+        ds = depth[lsrc + 1] - depth[lsrc]
+        dp = depth[lsrc + 1] - zsrc
+    dm = zsrc - depth[lsrc]
 
-    # Rm and Rp; swapped if up=True
     Rmp = Rm
     Rpm = Rp
+    if jac_mode:
+        jac_Rmp = jac_Rm
+        jac_Rpm = jac_Rp
 
-    # Boolean if plus or minus has to be calculated
     plusset = [13, 23, 33, 14, 24, 34, 15, 25, 35]
-    if TM:
-        plus = ab in plusset
-    else:
-        plus = ab not in plusset
+    plus = (ab in plusset) if TM else (ab not in plusset)
+    pm = 1 if plus else -1
+    pup = -1
+    mupm = 1
 
-    # Sign-switches
-    pm = 1     # + if plus=True, - if plus=False
-    if not plus:
-        pm = -1
-    pup = -1   # + if up=True,   - if up=False
-    mupm = 1   # + except if up=True and plus=False
+    iGam = Gam[:, :, lsrc, :]               # (nfreq, noff, nlambda)
+    if jac_mode:
+        jac_iGam = jac_Gam[:, :, lsrc, :, :]    # (nfreq, noff, nlambda, nlayer_res)
 
-    # Gamma of source layer
-    iGam = Gam[:, :, lsrc, :]
-
-    # Calculate down- and up-going fields
     for up in [False, True]:
 
-        # No upgoing field if rec is in last layer or below src
-        if up and (lrec == nlayer-1 or lrec > lsrc):
+        if up and (lrec == nlayer - 1 or lrec > lsrc):
             Pu = np.zeros_like(iGam)
+            if jac_mode:
+                jac_Pu = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=Gam.dtype)
             continue
-        # No downgoing field if rec is in first layer or above src
         if not up and (lrec == 0 or lrec < lsrc):
             Pd = np.zeros_like(iGam)
+            if jac_mode:
+                jac_Pd = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=Gam.dtype)
             continue
 
-        # Swaps if up=True
         if up:
             if not last_layer:
                 dp, dm = dm, dp
             else:
                 dp = dm
             Rmp, Rpm = Rpm, Rmp
+            if jac_mode:
+                jac_Rmp, jac_Rpm = jac_Rpm, jac_Rmp
             first_layer, last_layer = last_layer, first_layer
-            rsrcl = nlsr-1  # src-layer in refl. (Rp/Rm), last (nlsr-1) if up
-            izrange = range(nlsr-2)
+            rsrcl = nlsr - 1
+            izrange = range(nlsr - 2)
             isr = lrec
             last = 0
             pup = 1
             if not plus:
                 mupm = -1
 
-        P = np.zeros_like(iGam)
+        if jac_mode:
+            jP = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=Gam.dtype)
 
-        # Calculate Pu+, Pu-, Pd+, Pd-
-        if lsrc == lrec:  # rec in src layer; Eqs  81/82, A-8/A-9
-            if last_layer:  # If src/rec are in top (up) or bottom (down) layer
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            tRmp = Rmp[i, ii, 0, iv]
-                            tiGam = iGam[i, ii, iv]
-                            P[i, ii, iv] = tRmp*np.exp(-tiGam*dm)
+        # --- lsrc == lrec (rec in src layer) ---
+        if lsrc == lrec:
+            Rmp0 = Rmp[:, :, 0, :]
 
-            else:           # If src and rec are in any layer in between
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            tiGam = iGam[i, ii, iv]
-                            tRpm = Rpm[i, ii, 0, iv]
-                            tRmp = Rmp[i, ii, 0, iv]
-                            p1 = np.exp(-tiGam*dm)
-                            p2 = pm*tRpm*np.exp(-tiGam*(ds+dp))
-                            p3 = 1 - tRmp * tRpm * np.exp(-2*tiGam*ds)
-                            P[i, ii, iv] = (p1 + p2) * tRmp/p3
-
-        else:           # rec above (up) / below (down) src layer
-            #           # Eqs  95/96,  A-24/A-25 for rec above src layer
-            #           # Eqs 103/104, A-32/A-33 for rec below src layer
-
-            # First compute P_{s-1} (up) / P_{s+1} (down)
-            iRpm = Rpm[:, :, rsrcl, :]
-            if first_layer:  # If src is in bottom (up) / top (down) layer
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            tiRpm = iRpm[i, ii, iv]
-                            tiGam = iGam[i, ii, iv]
-                            P[i, ii, iv] = (1 + tiRpm)*mupm*np.exp(-tiGam*dp)
+            if last_layer:
+                # P = Rmp[0] * exp(-iGam*dm)
+                e_dm = np.exp(-iGam * dm)
+                P = Rmp0 * e_dm
+                if jac_mode:
+                    jRmp0 = jac_Rmp[:, :, 0, :, :]
+                    je_dm = -dm * jac_iGam * e_dm[:, :, :, np.newaxis]
+                    jP = (jRmp0 * e_dm[:, :, :, np.newaxis]
+                          + Rmp0[:, :, :, np.newaxis] * je_dm)
             else:
-                for i in range(nfreq):
-                    for ii in range(noff):
-                        for iv in range(nlambda):
-                            iRmp = Rmp[i, ii, rsrcl, iv]
-                            tiGam = iGam[i, ii, iv]
-                            tRpm = iRpm[i, ii, iv]
-                            p1 = mupm*np.exp(-tiGam*dp)
-                            p2 = pm*mupm*iRmp*np.exp(-tiGam * (ds+dm))
-                            p3 = (1 + tRpm)/(1 - iRmp*tRpm*np.exp(-2*tiGam*ds))
-                            P[i, ii, iv] = (p1 + p2) * p3
+                # P = (exp(-iGam*dm) + pm*Rpm[0]*exp(-iGam*(ds+dp)))
+                #      * Rmp[0] / (1 - Rmp[0]*Rpm[0]*exp(-2*iGam*ds))
+                Rpm0 = Rpm[:, :, 0, :]
 
-            # If up or down and src is in last but one layer
-            if up or (not up and lsrc+1 < nlayer-1):
-                ddepth = depth[lsrc+1-1*pup]-depth[lsrc-1*pup]
+                e_dm   = np.exp(-iGam * dm)
+                e_dsdp = np.exp(-iGam * (ds + dp))
+                e_2ds  = np.exp(-2.0 * iGam * ds)
+
+                p2 = pm * Rpm0 * e_dsdp
+                p3 = 1.0 - Rmp0 * Rpm0 * e_2ds
+
+                num = (e_dm + p2) * Rmp0
+                P = num / p3
+
+                if jac_mode:
+                    jRmp0 = jac_Rmp[:, :, 0, :, :]
+                    jRpm0 = jac_Rpm[:, :, 0, :, :]
+                    je_dm   = -dm      * jac_iGam * e_dm[:, :, :, np.newaxis]
+                    je_dsdp = -(ds+dp) * jac_iGam * e_dsdp[:, :, :, np.newaxis]
+                    je_2ds  = -2.0*ds  * jac_iGam * e_2ds[:, :, :, np.newaxis]
+                    jp2 = pm * (jRpm0 * e_dsdp[:, :, :, np.newaxis]
+                                + Rpm0[:, :, :, np.newaxis] * je_dsdp)
+                    jp3 = -(
+                        (jRmp0 * Rpm0[:, :, :, np.newaxis]
+                         + Rmp0[:, :, :, np.newaxis] * jRpm0) * e_2ds[:, :, :, np.newaxis]
+                        + Rmp0[:, :, :, np.newaxis] * Rpm0[:, :, :, np.newaxis] * je_2ds
+                    )
+                    jnum = ((je_dm + jp2) * Rmp0[:, :, :, np.newaxis]
+                            + (e_dm + p2)[:, :, :, np.newaxis] * jRmp0)
+                    jP = (jnum * p3[:, :, :, np.newaxis]
+                          - num[:, :, :, np.newaxis] * jp3) / p3[:, :, :, np.newaxis] ** 2
+
+        # --- lsrc != lrec (rec above/below src layer) ---
+        else:
+            Rpm_r = Rpm[:, :, rsrcl, :]           # iRpm in primal
+
+            if first_layer:
+                # P = (1 + iRpm) * mupm * exp(-iGam*dp)
+                e_dp = np.exp(-iGam * dp)
+                P = (1.0 + Rpm_r) * mupm * e_dp
+                if jac_mode:
+                    jRpm_r = jac_Rpm[:, :, rsrcl, :, :]
+                    je_dp = -dp * jac_iGam * e_dp[:, :, :, np.newaxis]
+                    jP = mupm * (jRpm_r * e_dp[:, :, :, np.newaxis]
+                                 + (1.0 + Rpm_r)[:, :, :, np.newaxis] * je_dp)
+            else:
+                Rmp_r = Rmp[:, :, rsrcl, :]       # iRmp in primal
+
+                e_dp   = np.exp(-iGam * dp)
+                e_dsdm = np.exp(-iGam * (ds + dm))
+                e_2ds  = np.exp(-2.0 * iGam * ds)
+
+                p1 = mupm * e_dp
+                p2 = pm * mupm * Rmp_r * e_dsdm
+                # p3 = (1 + Rpm_r) / (1 - Rmp_r*Rpm_r*exp(-2*iGam*ds))
+                num3 = 1.0 + Rpm_r
+                den3 = 1.0 - Rmp_r * Rpm_r * e_2ds
+
+                P = (p1 + p2) * (num3 / den3)
+
+                if jac_mode:
+                    jRpm_r = jac_Rpm[:, :, rsrcl, :, :]
+                    jRmp_r = jac_Rmp[:, :, rsrcl, :, :]
+                    je_dp   = -dp       * jac_iGam * e_dp[:, :, :, np.newaxis]
+                    je_dsdm = -(ds+dm)  * jac_iGam * e_dsdm[:, :, :, np.newaxis]
+                    je_2ds  = -2.0*ds   * jac_iGam * e_2ds[:, :, :, np.newaxis]
+                    jp1 = mupm * je_dp
+                    jp2 = pm * mupm * (jRmp_r * e_dsdm[:, :, :, np.newaxis]
+                                       + Rmp_r[:, :, :, np.newaxis] * je_dsdm)
+                    jnum3 = jRpm_r
+                    jden3 = -(
+                        (jRmp_r * Rpm_r[:, :, :, np.newaxis]
+                         + Rmp_r[:, :, :, np.newaxis] * jRpm_r) * e_2ds[:, :, :, np.newaxis]
+                        + Rmp_r[:, :, :, np.newaxis] * Rpm_r[:, :, :, np.newaxis] * je_2ds
+                    )
+                    jp3 = (jnum3 * den3[:, :, :, np.newaxis]
+                           - num3[:, :, :, np.newaxis] * jden3) / den3[:, :, :, np.newaxis] ** 2
+                    jP = ((jp1 + jp2) * (num3 / den3)[:, :, :, np.newaxis]
+                          + (p1 + p2)[:, :, :, np.newaxis] * jp3)
+
+            # Divide by (1 + Rpm[rsrcl-pup]*exp(-2*Gam[lsrc-pup]*ddepth))
+            if up or (not up and lsrc + 1 < nlayer - 1):
+                ddepth = depth[lsrc + 1 - pup] - depth[lsrc - pup]
                 if np.isfinite(ddepth):
-                    for i in range(nfreq):
-                        for ii in range(noff):
-                            for iv in range(nlambda):
-                                tiRpm = Rpm[i, ii, rsrcl-1*pup, iv]
-                                tiGam = Gam[i, ii, lsrc-1*pup, iv]
-                                fact = tiRpm*np.exp(-2*tiGam*ddepth)
-                                P[i, ii, iv] /= 1 + fact
+                    tiRpm = Rpm[:, :, rsrcl - pup, :]
+                    tiGam = Gam[:, :, lsrc - pup, :]
 
-            # Second compute P for all other layers
+                    e2 = np.exp(-2.0 * tiGam * ddepth)
+                    fact = tiRpm * e2
+                    denom = 1.0 + fact
+                    # P /= denom
+                    if jac_mode:
+                        jtiRpm = jac_Rpm[:, :, rsrcl - pup, :, :]
+                        jtiGam = jac_Gam[:, :, lsrc - pup, :, :]
+                        je2 = -2.0 * ddepth * jtiGam * e2[:, :, :, np.newaxis]
+                        jfact = (jtiRpm * e2[:, :, :, np.newaxis]
+                                 + tiRpm[:, :, :, np.newaxis] * je2)
+                        jP = (jP * denom[:, :, :, np.newaxis]
+                              - P[:, :, :, np.newaxis] * jfact) / denom[:, :, :, np.newaxis] ** 2
+                    P = P / denom
+
+            # Multiply-divide loop for intermediate layers
             if nlsr > 2:
                 for iz in izrange:
-                    ddepth = depth[isr+iz+pup+1]-depth[isr+iz+pup]
-                    for i in range(nfreq):
-                        for ii in range(noff):
-                            for iv in range(nlambda):
-                                tiRpm = Rpm[i, ii, iz+pup, iv]
-                                piGam = Gam[i, ii, isr+iz+pup, iv]
-                                p1 = (1+tiRpm)*np.exp(-piGam*ddepth)
-                                P[i, ii, iv] *= p1
+                    # Multiply by (1 + Rpm[iz+pup]) * exp(-Gam[isr+iz+pup]*ddepth)
+                    ddepth = depth[isr + iz + pup + 1] - depth[isr + iz + pup]
+                    tiRpm = Rpm[:, :, iz + pup, :]
+                    piGam = Gam[:, :, isr + iz + pup, :]
 
-                    # If rec/src NOT in first/last layer (up/down)
-                    if isr+iz != last:
-                        ddepth = depth[isr+iz+1] - depth[isr+iz]
-                        for i in range(nfreq):
-                            for ii in range(noff):
-                                for iv in range(nlambda):
-                                    tiRpm = Rpm[i, ii, iz, iv]
-                                    piGam2 = Gam[i, ii, isr+iz, iv]
-                                    p1 = 1 + tiRpm*np.exp(-2*piGam2 * ddepth)
-                                    P[i, ii, iv] /= p1
+                    e_dd = np.exp(-piGam * ddepth)
+                    p1 = (1.0 + tiRpm) * e_dd
+                    if jac_mode:
+                        jtiRpm = jac_Rpm[:, :, iz + pup, :, :]
+                        jpiGam = jac_Gam[:, :, isr + iz + pup, :, :]
+                        je_dd = -ddepth * jpiGam * e_dd[:, :, :, np.newaxis]
+                        jp1 = (jtiRpm * e_dd[:, :, :, np.newaxis]
+                               + (1.0 + tiRpm)[:, :, :, np.newaxis] * je_dd)
+                        jP = jP * p1[:, :, :, np.newaxis] + P[:, :, :, np.newaxis] * jp1
+                    P = P * p1
 
-        # Store P in Pu/Pd
+                    # Divide by (1 + Rpm[iz]*exp(-2*Gam[isr+iz]*ddepth2))
+                    if isr + iz != last:
+                        ddepth2 = depth[isr + iz + 1] - depth[isr + iz]
+                        tiRpm2 = Rpm[:, :, iz, :]
+                        piGam2 = Gam[:, :, isr + iz, :]
+
+                        e_2dd = np.exp(-2.0 * piGam2 * ddepth2)
+                        denom2 = 1.0 + tiRpm2 * e_2dd
+                        if jac_mode:
+                            jtiRpm2 = jac_Rpm[:, :, iz, :, :]
+                            jpiGam2 = jac_Gam[:, :, isr + iz, :, :]
+                            je_2dd = -2.0 * ddepth2 * jpiGam2 * e_2dd[:, :, :, np.newaxis]
+                            jdenom2 = (jtiRpm2 * e_2dd[:, :, :, np.newaxis]
+                                       + tiRpm2[:, :, :, np.newaxis] * je_2dd)
+                            jP = (jP * denom2[:, :, :, np.newaxis]
+                                  - P[:, :, :, np.newaxis] * jdenom2) / denom2[:, :, :, np.newaxis] ** 2
+                        P = P / denom2
+
         if up:
             Pu = P
+            if jac_mode:
+                jac_Pu = jP
         else:
             Pd = P
+            if jac_mode:
+                jac_Pd = jP
 
-    # Return fields (up- and downgoing)
+    if jac_mode:
+        return Pu, Pd, jac_Pu, jac_Pd
     return Pu, Pd
 
 

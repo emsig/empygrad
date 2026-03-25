@@ -21,7 +21,7 @@ from empygrad import kernel
 from empygrad import scripts
 
 # Import most important functions
-from empygrad.model import bipole, dipole, loop, ip_and_q
+from empygrad.model import bipole, dipole, ip_and_q
 from empygrad.utils import EMArray, set_minimum, get_minimum, Report
 
 # For top-namespace

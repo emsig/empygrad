@@ -21,7 +21,8 @@ Entry point for the command-line interface (CLI).
 import sys
 import argparse
 
-from empygrad import io, model, utils
+from empygrad import model, utils
+from empymod import io
 
 
 def main(args=None):
