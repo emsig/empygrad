@@ -22,7 +22,7 @@ import numpy as np
 
 from external import emmod
 
-# 1. Define coordinates for empymod:
+# 1. Define coordinates for empygrad:
 
 # We only check 8 distinct locations (faster)
 dx = 3000

@@ -8,7 +8,7 @@ r"""Routines to create data from external modellers, for comparison purposes.
 
 - Green3D: You must have Green3D installed (for which you need to be a member
   of the CEMI consortium). The following files must be in the folder
-  `empymod/tests/green3d`: `green3d.m`, `grint.mexa64`,
+  `empygrad/tests/green3d`: `green3d.m`, `grint.mexa64`,
   `grint.mexw64`,`normal.mexa64`, and `normal.mexw64`. Furthermore, you need
   Matlab.
 
@@ -51,7 +51,7 @@ def green3d(src, rec, depth, res, freq, aniso, par, strength=0):
 
     You must have Green3D installed (for which you need to be a member of the
     CEMI consortium). The following files must be in the folder
-    `empymod/tests/green3d`:
+    `empygrad/tests/green3d`:
         - `green3d.m`
         - `grint.mexa64`
         - (`grint.mexw64`)
@@ -145,7 +145,7 @@ def dipole1d(src, rec, depth, res, freq, srcpts=5):
     else:
         r = 0  # 0 = dipole
 
-    # Angle: In empymod, x is Easting, and the angle is the deviation from x
+    # Angle: In empygrad, x is Easting, and the angle is the deviation from x
     #        anticlockwise.  In Dipole1D, x is Northing, and the angle is the
     #        deviation from x clockwise. Convert angle to within 0<=ang<360:
     ang = (-src[3] % - 360 + 90) % 360

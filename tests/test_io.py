@@ -82,7 +82,7 @@ class TestSaveLoadData:
                 text = f.read()
 
             assert 'date' in text
-            assert 'empymod v' in text
+            assert 'empygrad v' in text
             assert 'shape' in text
             assert '(4, 7, 3)' in text
             assert str(orig.dtype) in text

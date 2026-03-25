@@ -4,7 +4,7 @@ from scipy.special import erf
 from os.path import join, dirname
 from numpy.testing import assert_allclose
 
-# Import main modelling routines from empymod directly to ensure they are in
+# Import main modelling routines from empygrad directly to ensure they are in
 # the __init__.py-file.
 from empymod import model
 from empymod import bipole, dipole, analytical, loop
@@ -19,7 +19,7 @@ from empymod.kernel import fullspace, halfspace
 
 # Load required data
 # Data generated with create_self.py
-DATAEMPYMOD = np.load(join(dirname(__file__), 'data/empymod.npz'),
+DATAEMPYMOD = np.load(join(dirname(__file__), 'data/empygrad.npz'),
                       allow_pickle=True)
 # Data generated with create_data/fem_tem.py
 DATAFEMTEM = np.load(join(dirname(__file__), 'data/fem_tem.npz'),
@@ -1148,7 +1148,7 @@ def test_analytical():
 
 
 def test_gpr(capsys):
-    # empymod is not really designed for GPR, you would rather do that straight
+    # empygrad is not really designed for GPR, you would rather do that straight
     # in the time domain. However, it works. We just run a test here, to check
     # that it remains the status quo.
     res = DATAEMPYMOD['gprout'][()]

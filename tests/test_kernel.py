@@ -14,7 +14,7 @@ from empymod import bipole
 
 # Load required data
 # Data generated with create_data/self.py
-DATAEMPYMOD = np.load(join(dirname(__file__), 'data/empymod.npz'),
+DATAEMPYMOD = np.load(join(dirname(__file__), 'data/empygrad.npz'),
                       allow_pickle=True)
 # Data generated with create_data/kernel.py
 DATAKERNEL = np.load(join(dirname(__file__), 'data/kernel.npz'),

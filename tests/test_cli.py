@@ -26,38 +26,38 @@ def test_main(script_runner):
 
     # help
     for inp in ['--help', '-h']:
-        ret = script_runner.run(['empymod', inp])
+        ret = script_runner.run(['empygrad', inp])
         assert ret.success
         assert "3D electromagnetic modeller for 1D VTI media" in ret.stdout
 
     # info
-    ret = script_runner.run('empymod')
+    ret = script_runner.run('empygrad')
     assert ret.success
     assert "3D electromagnetic modeller for 1D VTI media." in ret.stdout
-    assert "empymod v" in ret.stdout
+    assert "empygrad v" in ret.stdout
 
     # report
-    ret = script_runner.run(['empymod', '--report'])
+    ret = script_runner.run(['empygrad', '--report'])
     assert ret.success
     # Exclude time to avoid errors.
-    # Exclude empymod-version (after 300), because if run locally without
-    # having empymod installed it will be "unknown" for the __main__ one.
+    # Exclude empygrad-version (after 300), because if run locally without
+    # having empygrad installed it will be "unknown" for the __main__ one.
     assert empymod.utils.Report().__repr__()[115:300] in ret.stdout
 
-    # version        -- VIA empymod/__main__.py by calling the folder empymod.
-    ret = script_runner.run(['python', 'empymod', '--version'])
+    # version        -- VIA empygrad/__main__.py by calling the folder empygrad.
+    ret = script_runner.run(['python', 'empygrad', '--version'])
     assert ret.success
-    assert "empymod v" in ret.stdout
+    assert "empygrad v" in ret.stdout
 
-    # Wrong function -- VIA empymod/__main__.py by calling the file.
+    # Wrong function -- VIA empygrad/__main__.py by calling the file.
     ret = script_runner.run(
-            ['python', join('empymod', '__main__.py'), 'wrong'])
+            ['python', join('empygrad', '__main__.py'), 'wrong'])
     assert not ret.success
     assert "error: argument routine: invalid choice: 'wrong'" in ret.stderr
 
     # try to run
     ret = script_runner.run(
-            ['empymod', 'bipole', 'test.json', 'output.txt'])
+            ['empygrad', 'bipole', 'test.json', 'output.txt'])
     assert not ret.success
     assert "No such file or directory" in ret.stderr
 
@@ -172,7 +172,7 @@ class TestRun:
 @pytest.mark.script_launch_mode('subprocess')
 def test_import_time(script_runner):
     # Relevant for responsiveness of CLI: How long does it take to import?
-    cmd = ["python", "-Ximporttime", "-c", "import empymod"]
+    cmd = ["python", "-Ximporttime", "-c", "import empygrad"]
     out = script_runner.run(cmd, print_result=False)
     import_time_s = float(out.stderr.split('|')[-2])/1e6
     # Currently we check t < 1.0 s (really slow, should be < 0.2 s)

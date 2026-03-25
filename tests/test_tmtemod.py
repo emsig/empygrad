@@ -7,8 +7,8 @@ from empymod.scripts import tmtemod
 from empymod import kernel, filters, dipole
 
 # We only check that the summed return values in the functions in tmtemod agree
-# with the corresponding functions from empymod. Nothing more. The examples are
-# based on the examples in empymod/tests/create_data.
+# with the corresponding functions from empygrad. Nothing more. The examples are
+# based on the examples in empygrad/tests/create_data.
 
 # Simple model, three frequencies, 6 layers
 freq = np.array([0.003, 2.5, 1e6])
@@ -39,11 +39,11 @@ def test_dipole():
             inp = {'src': src, 'rec': rec, 'depth': depth[1:-1], 'res': res,
                    'freqtime': f, 'aniso': aniso, 'verb': 0}
 
-            # empymod-version
+            # empygrad-version
             out = dipole(epermH=eperm, epermV=eperm, mpermH=mperm,
                          mpermV=mperm, xdirect=False, **inp)
 
-            # empymod.scripts-version
+            # empygrad.scripts-version
             TM, TE = tmtemod.dipole(eperm=eperm, mperm=mperm, **inp)
             TM = TM[0] + TM[1] + TM[2] + TM[3] + TM[4]
             TE = TE[0] + TE[1] + TE[2] + TE[3] + TE[4]
@@ -70,11 +70,11 @@ def test_greenfct():
                'lrec': np.array(lay), 'lsrc': np.array(lay),
                'zsrc': depth[lay+1]-50, 'zrec': depth[lay+1]-10}
 
-        # empymod-version
+        # empygrad-version
         out1, out2 = kernel.greenfct(ab=11, xdirect=False, msrc=False,
                                      mrec=False, **inp)
 
-        # empymod.scripts-version
+        # empygrad.scripts-version
         TM, TE = tmtemod.greenfct(**inp)
         TM = TM[0] + TM[1] + TM[2] + TM[3] + TM[4]
         TE = TE[0] + TE[1] + TE[2] + TE[3] + TE[4]
@@ -101,10 +101,10 @@ def test_fields():
         for TM in [True, False]:
             inp2['TM'] = TM
 
-            # empymod-version
+            # empygrad-version
             out = kernel.fields(ab=11, **inp2)
 
-            # empymod.scripts-version
+            # empygrad.scripts-version
             TMTE = tmtemod.fields(**inp2)
 
             # Check
