@@ -23,7 +23,7 @@ Further routines are:
 
 The :func:`dipole_k` routine can be used if you are interested in the
 wavenumber-domain result, without Hankel nor Fourier transform. It calls
-straight the :mod:`empymod.kernel`. The :func:`gpr`-routine convolves the
+straight the :mod:`empygrad.kernel`. The :func:`gpr`-routine convolves the
 frequency-domain result with a wavelet, and applies a gain to the time-domain
 result. This function is still experimental.
 
@@ -37,7 +37,7 @@ The modelling routines make use of the following two core routines:
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -129,7 +129,7 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
     res : array_like
         Horizontal resistivities rho_h (Ohm.m); #res = #depth + 1.
 
-        Alternatively, res can be a dictionary. See the main manual of empymod
+        Alternatively, res can be a dictionary. See the main manual of empygrad
         too see how to exploit this hook to re-calculate etaH, etaV, zetaH, and
         zetaV, which can be used to, for instance, use the Cole-Cole model for
         IP.
@@ -223,9 +223,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
         - If ``ht='dlf'``:
 
-          - ``dlf``: string of filter name in :mod:`empymod.filters` or the
+          - ``dlf``: string of filter name in :mod:`empygrad.filters` or the
             filter method itself. (default:
-            ``empymod.filters.Hankel().key_201_2009``)
+            ``empygrad.filters.Hankel().key_201_2009``)
           - ``pts_per_dec``: points per decade; (default: 0):
 
             - If 0: Standard DLF.
@@ -272,9 +272,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
         - If ``ft='dlf'``, ``'sin'``, or ``'cos'``:
 
-          - ``dlf``: string of filter name in :mod:`empymod.filters` or the
+          - ``dlf``: string of filter name in :mod:`empygrad.filters` or the
             filter method itself. (Default:
-            ``empymod.filters.Fourier().key_201_2012``)
+            ``empygrad.filters.Fourier().key_201_2012``)
           - ``pts_per_dec``: points per decade; (default: -1)
 
             - If 0: Standard DLF.
@@ -343,7 +343,7 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
         frequency-domain result. The signature of the function must be
         ``func(inp, p_dict)``, where ``inp`` is the dictionary you provide, and
         ``p_dict`` is a dictionary that contains all parameters so far computed
-        in empymod ``[locals()]``. Any change to the frequency domain result
+        in empygrad ``[locals()]``. Any change to the frequency domain result
         must be done in-place, and the function does not return anything. Refer
         to the time-domain loop examples in the gallery. The dictionary must
         contain at least the keyword ``'func'``, containing the actual
@@ -372,7 +372,7 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
     .. ipython::
 
-       In [1]: import empymod
+       In [1]: import empygrad
           ...: import numpy as np
           ...: # x-directed dipole source: x0, x1, y0, y1, z0, z1
           ...: src = [-50, 50, 0, 0, 100, 100]
@@ -386,9 +386,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
           ...: freq = 1
           ...: # Calculate electric field due to an electric source at 1 Hz.
           ...: # [msrc = mrec = False (default)]
-          ...: EMfield = empymod.bipole(src, rec, depth, res, freq, verb=3)
+          ...: EMfield = empygrad.bipole(src, rec, depth, res, freq, verb=3)
        Out[1]:
-          ...: :: empymod START  ::  v2.0.0
+          ...: :: empygrad START  ::  v2.0.0
           ...:
           ...:    depth       [m] :  0 300 1000 1050
           ...:    res     [Ohm.m] :  1E+20 0.3 1 50 1
@@ -422,7 +422,7 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
           ...:      > dip     [°] :  0
           ...:    Required ab's   :  11
           ...:
-          ...: :: empymod END; runtime = 0:00:00.005536 :: 1 kernel call(s)
+          ...: :: empygrad END; runtime = 0:00:00.005536 :: 1 kernel call(s)
 
        In [2]: EMfield[0]
        Out[2]: (1.6880934577857306e-10-3.083031298956568e-10j)
@@ -706,7 +706,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     res : array_like
         Horizontal resistivities rho_h (Ohm.m); #res = #depth + 1.
 
-        Alternatively, res can be a dictionary. See the main manual of empymod
+        Alternatively, res can be a dictionary. See the main manual of empygrad
         too see how to exploit this hook to re-calculate etaH, etaV, zetaH, and
         zetaV, which can be used to, for instance, use the Cole-Cole model for
         IP.
@@ -790,7 +790,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         frequency-domain result. The signature of the function must be
         ``func(inp, p_dict)``, where ``inp`` is the dictionary you provide, and
         ``p_dict`` is a dictionary that contains all parameters so far computed
-        in empymod ``[locals()]``. Any change to the frequency domain result
+        in empygrad ``[locals()]``. Any change to the frequency domain result
         must be done in-place, and the function does not return anything. Refer
         to the time-domain loop examples in the gallery. The dictionary must
         contain at least the keyword ``'func'``, containing the actual
@@ -817,13 +817,13 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
     .. ipython::
 
-       In [1]: import empymod
+       In [1]: import empygrad
           ...: import numpy as np
           ...: src = [0, 0, 100]
           ...: rec = [np.arange(1, 11)*500, np.zeros(10), 200]
           ...: depth = [0, 300, 1000, 1050]
           ...: res = [1e20, .3, 1, 50, 1]
-          ...: EMfield = empymod.dipole(
+          ...: EMfield = empygrad.dipole(
           ...:         src, rec, depth, res, freqtime=1, verb=1)
           ...: EMfield[0]
        Out[1]: (1.6880934577857306e-10-3.083031298956568e-10j)
@@ -927,12 +927,12 @@ def loop(src, rec, depth, res, freqtime, signal=None, aniso=None, epermH=None,
          strength=0, **kwargs):
     r"""Deprecated function for magnetic flux.
 
-    Use :func:`empymod.model.bipole` with ``msrc='b'`` and the relevant
+    Use :func:`empygrad.model.bipole` with ``msrc='b'`` and the relevant
     ``mrec`` instead.
     """
     msg = (
-        "Calling `empymod.model.loop` is deprecated and will be removed in "
-        "v3.0; use `empymod.model.bipole` with `msrc='b'` and the relevant "
+        "Calling `empygrad.model.loop` is deprecated and will be removed in "
+        "v3.0; use `empygrad.model.bipole` with `msrc='b'` and the relevant "
         "`mrec` instead."
     )
     warnings.warn(msg, DeprecationWarning)
@@ -957,8 +957,8 @@ def analytical(src, rec, res, freqtime, solution='fs', signal=None, ab=11,
     both sources and receiver must be either at the interface or within the
     subsurface, not in the air (this is NOT checked by the code).
 
-    You can call the functions :func:`empymod.kernel.fullspace` and
-    :func:`empymod.kernel.halfspace` in :mod:`empymod.kernel` directly. This
+    You can call the functions :func:`empygrad.kernel.fullspace` and
+    :func:`empygrad.kernel.halfspace` in :mod:`empygrad.kernel` directly. This
     interface is just to provide a consistent interface with the same input
     parameters as for instance for :func:`dipole`.
 
@@ -993,7 +993,7 @@ def analytical(src, rec, res, freqtime, solution='fs', signal=None, ab=11,
     res : float
         Horizontal resistivity rho_h (Ohm.m).
 
-        Alternatively, res can be a dictionary. See the main manual of empymod
+        Alternatively, res can be a dictionary. See the main manual of empygrad
         too see how to exploit this hook to re-calculate etaH, etaV, zetaH, and
         zetaV, which can be used to, for instance, use the Cole-Cole model for
         IP.
@@ -1096,12 +1096,12 @@ def analytical(src, rec, res, freqtime, solution='fs', signal=None, ab=11,
 
     .. ipython::
 
-       In [1]: import empymod
+       In [1]: import empygrad
           ...: import numpy as np
           ...: src = [0, 0, 0]
           ...: rec = [np.arange(1, 11)*500, np.zeros(10), 200]
           ...: res = 50
-          ...: EMfield = empymod.analytical(src, rec, res, freqtime=1, verb=0)
+          ...: EMfield = empygrad.analytical(src, rec, res, freqtime=1, verb=0)
           ...: EMfield[0]
        Out[1]: (4.030914049602561e-08-9.691638183648923e-10j)
 
@@ -1395,7 +1395,7 @@ def dipole_k(src, rec, depth, res, freq, wavenumber, ab=11, aniso=None,
 
     .. ipython::
 
-       In [1]: import empymod
+       In [1]: import empygrad
           ...: import numpy as np
           ...: src = [0, 0, 100]
           ...: rec = [5000, 0, 200]
@@ -1403,7 +1403,7 @@ def dipole_k(src, rec, depth, res, freq, wavenumber, ab=11, aniso=None,
           ...: res = [1e20, .3, 1, 50, 1]
           ...: freq = 1
           ...: wavenr = np.logspace(-3.7, -3.6, 10)
-          ...: PJ0, PJ1 = empymod.dipole_k(
+          ...: PJ0, PJ1 = empygrad.dipole_k(
           ...:         src, rec, depth, res, freq, wavenr, verb=0)
           ...: PJ0[0]
        Out[1]: (-2.5768974970445326e-08-2.0489943182087426e-09j)
@@ -1600,7 +1600,7 @@ def fem(ab, off, angle, zsrc, zrec, lsrc, lrec, depth, freq, etaH, etaV, zetaH,
     r"""Return electromagnetic frequency-domain response.
 
     This function is called from one of the modelling routines
-    :mod:`empymod.model`. Consult those for more details regarding the input
+    :mod:`empygrad.model`. Consult those for more details regarding the input
     and output parameters.
 
     This function can be used directly if you are sure the provided input is in
@@ -1674,7 +1674,7 @@ def tem(fEM, off, freq, time, signal, ft, ftarg, conv=True):
     r"""Return time-domain response of the frequency-domain response fEM.
 
     This function is called from one of the modelling routines
-    :mod:`empymod.model`. Consult those for more details regarding the input
+    :mod:`empygrad.model`. Consult those for more details regarding the input
     and output parameters.
 
     This function can be used directly if you are sure the provided input is in

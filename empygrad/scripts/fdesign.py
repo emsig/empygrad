@@ -2,7 +2,7 @@ r"""
 The add-on fdesign can be used to design digital linear filters for the Hankel
 or Fourier transform, or for any linear transform ([Ghos70]_). For this
 included or provided theoretical transform pairs can be used. Alternatively,
-one can use the EM modeller empymod to use the responses to an arbitrary 1D
+one can use the EM modeller empygrad to use the responses to an arbitrary 1D
 model as numerical transform pair.
 
 More information can be found in the following places:
@@ -18,7 +18,7 @@ in [Kong07]_ and is based on scripts by [Key12]_. The whole project of
 design his filters for [Key09]_, [Key12]_. Fruitful discussions with Evert Slob
 and Kerry Key improved the add-on substantially.
 
-Note that the use of empymod to create numerical transform pairs is, as of now,
+Note that the use of empygrad to create numerical transform pairs is, as of now,
 only implemented for the Hankel transform.
 
 
@@ -31,7 +31,7 @@ in the following way:
 
 .. code-block:: python
 
-   from empymod.scripts import fdesign
+   from empygrad.scripts import fdesign
 
    def my_tp_pair(var):
        '''My transform pair.'''
@@ -216,7 +216,7 @@ Implemented Fourier transforms
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -261,12 +261,12 @@ def design(n, spacing, shift, fI, fC=False, r=None, r_def=(1, 1, 2), reim=None,
     This routine can be used to design digital linear filters for the Hankel or
     Fourier transform, or for any linear transform ([Ghos70]_). For this
     included or provided theoretical transform pairs can be used.
-    Alternatively, one can use the EM modeller empymod to use the responses to
+    Alternatively, one can use the EM modeller empygrad to use the responses to
     an arbitrary 1D model as numerical transform pair.
 
     This filter designing tool uses the direct matrix inversion method as
     described in [Kong07]_ and is based on scripts by [Key12]_. The tool is an
-    add-on to the electromagnetic modeller empymod [Wert17]_. Fruitful
+    add-on to the electromagnetic modeller empygrad [Wert17]_. Fruitful
     discussions with Evert Slob and Kerry Key improved the add-on
     substantially.
 
@@ -360,7 +360,7 @@ def design(n, spacing, shift, fI, fC=False, r=None, r_def=(1, 1, 2), reim=None,
 
     Returns
     -------
-    filter : empymod.filter.DigitalFilter instance
+    filter : empygrad.filter.DigitalFilter instance
         Best filter for the input parameters.
     full : tuple
         Output from scipy.optimize.brute with full_output=True. (Returned when
@@ -497,7 +497,7 @@ def save_filter(name, filt, full=None, path='filters'):
         nspace, nshift = full[3].shape
 
         # Create header
-        header = 'Full inversion output from empymod.fdesign.design\n'
+        header = 'Full inversion output from empygrad.fdesign.design\n'
         header += 'Line 11: Nr of spacing values\n'
         header += 'Line 12: Nr of shift values\n'
         header += 'Line 13: Best spacing value\n'
@@ -1169,10 +1169,10 @@ def cos_3(a=1, inverse=False):
 def empy_hankel(ftype, zsrc, zrec, res, freqtime, depth=None, aniso=None,
                 epermH=None, epermV=None, mpermH=None, mpermV=None,
                 htarg=None, verblhs=0, verbrhs=0):
-    r"""Numerical transform pair with empymod.
+    r"""Numerical transform pair with empygrad.
 
     All parameters except `ftype`, `verblhs`, and `verbrhs` correspond to the
-    input parameters to `empymod.dipole`. See there for more information.
+    input parameters to `empygrad.dipole`. See there for more information.
 
     Note that if depth=None or [], the analytical full-space solutions will be
     used (much faster).
@@ -1191,7 +1191,7 @@ def empy_hankel(ftype, zsrc, zrec, res, freqtime, depth=None, aniso=None,
         Note that ftype='j2' only works for fC, not for fI.
 
     verblhs, verbrhs: int
-        verb-values provided to empymod for lhs and rhs.
+        verb-values provided to empygrad for lhs and rhs.
 
     """
     if htarg is None:
@@ -1232,14 +1232,14 @@ def empy_hankel(ftype, zsrc, zrec, res, freqtime, depth=None, aniso=None,
         x = 1/np.sqrt(2)
         y = 1/np.sqrt(2)
 
-    # rhs: empymod.model.dipole
+    # rhs: empygrad.model.dipole
     # If depth=[], the analytical full-space solution will be used internally
     def rhs(r):
         out = dipole(rec=[r*x, r*y, zrec], ht='qwe', xdirect=True,
                      verb=verbrhs, htarg=htarg, freqtime=freqtime, **model)
         return out
 
-    # lhs: empymod.model.dipole_k
+    # lhs: empygrad.model.dipole_k
     def lhs(k):
         lhs0, lhs1 = dipole_k(rec=[x, y, zrec], wavenumber=k, verb=verblhs,
                               freq=freqtime, **model)
@@ -1449,7 +1449,7 @@ def _print_count(log):
 def _get_matplotlib(verb=0):
     """Lazy load of matplotlib.
 
-    Matplotlib is a soft dependency of empymod, and only used in fdesign.
+    Matplotlib is a soft dependency of empygrad, and only used in fdesign.
     However, if it is installed we want to avoid loading straight away, as
     this slows down the start of the CLI significantly.
     """

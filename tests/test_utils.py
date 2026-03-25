@@ -1159,7 +1159,7 @@ def test_printstartfinish(capsys):
     t0 = utils.printstartfinish(3)
     assert isinstance(t0, float)
     out, _ = capsys.readouterr()
-    assert ":: empymod START  ::  v" in out
+    assert ":: empygrad START  ::  v" in out
 
     utils.printstartfinish(0, t0)
     out, _ = capsys.readouterr()
@@ -1167,7 +1167,7 @@ def test_printstartfinish(capsys):
 
     utils.printstartfinish(3, t0)
     out, _ = capsys.readouterr()
-    assert out[:27] == "\n:: empymod END; runtime = "
+    assert out[:27] == "\n:: empygrad END; runtime = "
 
     utils.printstartfinish(3, t0, 13)
     out, _ = capsys.readouterr()
@@ -1307,7 +1307,7 @@ def test_report(capsys):
     # Reporting is now done by the external package scooby.
     # We just ensure the shown packages do not change (core and optional).
     out1 = scooby.Report(
-            core=['numpy', 'scipy', 'numba', 'empymod', 'libdlf'],
+            core=['numpy', 'scipy', 'numba', 'empygrad', 'libdlf'],
             optional=['IPython', 'matplotlib'],
             ncol=3)
     out2 = utils.Report()
@@ -1319,7 +1319,7 @@ def test_report(capsys):
 @pytest.mark.skipif(not sys.platform.startswith('linux'), reason="Not Linux.")
 def test_import_time():
     # Relevant for the CLI: How long does it take to import?
-    cmd = ["time", "-f", "%U", "python", "-c", "import empymod"]
+    cmd = ["time", "-f", "%U", "python", "-c", "import empygrad"]
     # Run it twice, just in case.
     subprocess.run(cmd)
     subprocess.run(cmd)

@@ -1,5 +1,5 @@
 """
-Utilities for :mod:`empymod.model` such as checking input parameters.
+Utilities for :mod:`empygrad.model` such as checking input parameters.
 
 This module consists of four groups of functions:
    0. General settings
@@ -10,7 +10,7 @@ This module consists of four groups of functions:
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -46,7 +46,7 @@ try:
     from empymod.version import version as __version__
 except ImportError:
     # If it was not installed, then we don't know the version. We could throw a
-    # warning here, but this case *should* be rare. empymod should be installed
+    # warning here, but this case *should* be rare. empygrad should be installed
     # properly!
     __version__ = 'unknown-'+datetime.today().strftime('%Y%m%d')
 
@@ -86,7 +86,7 @@ class EMArray(np.ndarray):
     Examples
     --------
     >>> import numpy as np
-    >>> from empymod.utils import EMArray
+    >>> from empygrad.utils import EMArray
     >>> emvalues = EMArray(np.array([1+1j, 1-4j, -1+2j]))
     >>> print(f"Amplitude         : {emvalues.amp()}")
     Amplitude         : [1.41421356 4.12310563 2.23606798]
@@ -152,7 +152,7 @@ def check_ab(ab, verb):
     r"""Check source-receiver configuration.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -221,7 +221,7 @@ def check_bipole(inp, name, mx=None, verb=1):
     r"""Check finite-length dipole parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -365,7 +365,7 @@ def check_bipole(inp, name, mx=None, verb=1):
 
     if mx is None:
         msg = (
-            "The signature of `empymod.utils.check_bipole` changed from `inp, "
+            "The signature of `empygrad.utils.check_bipole` changed from `inp, "
             "ninp, ninpz, isdipole = check_bipole(inp, name)` to `inp, ninp, "
             "ninpz, isdipole, mx, xtype = check_bipole(inp, name, mx, verb)`. "
             "The old signature will be removed in v3.0."
@@ -380,7 +380,7 @@ def check_dipole(inp, name, verb):
     r"""Check dipole parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -445,7 +445,7 @@ def check_frequency(freq, res, aniso, epermH, epermV, mpermH, mpermV, verb):
     r"""Calculate frequency-dependent parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -534,7 +534,7 @@ def check_hankel(ht, htarg, verb):
     r"""Check Hankel transform parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -709,7 +709,7 @@ def check_model(depth, res, aniso, epermH, epermV, mpermH, mpermV, xdirect,
     r"""Check the model: depth and corresponding layer parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -907,7 +907,7 @@ def check_loop(loop, ht, htarg, verb):
     r"""Check loop parameter.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -965,7 +965,7 @@ def check_time(time, signal, ft, ftarg, verb, new=False):
     r"""Check time domain specific input parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1267,7 +1267,7 @@ def check_time(time, signal, ft, ftarg, verb, new=False):
         return time, freq, ft, targ, waveform
     else:
         msg = (
-            "The signature of `empymod.utils.check_time` changed from "
+            "The signature of `empygrad.utils.check_time` changed from "
             "returning `time, freq, ft, targ` to returning `time, freq, ft, "
             "targ, waveform`. The old signature will be removed in v3.0."
         )
@@ -1279,7 +1279,7 @@ def check_time_only(time, signal, verb, new=False):
     r"""Check time and signal parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1340,7 +1340,7 @@ def check_time_only(time, signal, verb, new=False):
         return time, signal
     else:
         msg = (
-            "The signature of `empymod.utils.check_time_only` changed from "
+            "The signature of `empygrad.utils.check_time_only` changed from "
             "returning `time` to returning `time, signal`. "
             "The old signature will be removed in v3.0."
         )
@@ -1351,7 +1351,7 @@ def check_time_only(time, signal, verb, new=False):
 def check_waveform(time, nodes, amplitudes, verb, signal=0, nquad=3):
     r"""Check waveform dict and create waveform function.
 
-    This check-function is called from :mod:`empymod.utils.check_time_only`.
+    This check-function is called from :mod:`empygrad.utils.check_time_only`.
 
     The waveform function is based on work from Kerry Key (DIPOLE1D).
 
@@ -1469,7 +1469,7 @@ def check_solution(solution, signal, ab, msrc, mrec):
     r"""Check required solution with parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1515,7 +1515,7 @@ def get_abs(msrc, mrec, srcazm, srcdip, recazm, recdip, verb):
     r"""Get required ab's for given angles.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1612,7 +1612,7 @@ def get_geo_fact(ab, srcazm, srcdip, recazm, recdip, msrc, mrec):
     r"""Get required geometrical scaling factor for given angles.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1674,7 +1674,7 @@ def get_layer_nr(inp, depth):
         chosen.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1715,7 +1715,7 @@ def get_off_ang(src, rec, nsrc, nrec, verb):
     r"""Get depths, offsets, angles, hence spatial input parameters.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -1768,7 +1768,7 @@ def get_azm_dip(inp, iz, ninpz, intpts, isdipole, strength, name, verb):
     r"""Get angles, interpolation weights and normalization weights.
 
     This check-function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a detailed
+    :mod:`empygrad.model`. Consult these modelling routines for a detailed
     description of the input parameters.
 
     Parameters
@@ -2048,11 +2048,11 @@ def printstartfinish(verb, inp=None, kcount=None):
             ktxt = ' '
             if kcount:
                 ktxt += str(kcount) + ' kernel call(s)'
-            print(f"\n:: empymod END; runtime = {ttxt} ::{ktxt}\n")
+            print(f"\n:: empygrad END; runtime = {ttxt} ::{ktxt}\n")
     else:
         t0 = default_timer()
         if verb > 2:
-            print(f"\n:: empymod START  ::  v{__version__}\n")
+            print(f"\n:: empygrad START  ::  v{__version__}\n")
         return t0
 
 
@@ -2205,7 +2205,7 @@ class Report(ScoobyReport):
     console), either as html-table (notebook) or as plain text (anywhere).
 
     Always shown are the OS, number of CPU(s), `numpy`, `scipy`, `numba`,
-    `empymod`, `sys.version`, and time/date.
+    `empygrad`, `sys.version`, and time/date.
 
     Additionally shown are, if they can be imported, `IPython`, and
     `matplotlib`. It also shows MKL information, if available.
@@ -2239,7 +2239,7 @@ class Report(ScoobyReport):
     --------
     >>> import pytest
     >>> import dateutil
-    >>> from empymod import Report
+    >>> from empygrad import Report
     >>> Report()                            # Default values
     >>> Report(pytest)                      # Provide additional package
     >>> Report([pytest, dateutil], ncol=5)  # Set nr of columns
@@ -2250,7 +2250,7 @@ class Report(ScoobyReport):
         """Initiate a scooby.Report instance."""
 
         # Mandatory packages.
-        core = ['numpy', 'scipy', 'numba', 'empymod', 'libdlf']
+        core = ['numpy', 'scipy', 'numba', 'empygrad', 'libdlf']
 
         # Optional packages.
         optional = ['IPython', 'matplotlib']

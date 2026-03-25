@@ -3,7 +3,7 @@ Utility functions for writing and reading inputs and data.
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -37,7 +37,7 @@ def __dir__():
 def save_input(fname, data, **kwargs):
     """Save input dict to disk.
 
-    Save the input provided to an empymod modelling routine on disk.
+    Save the input provided to an empygrad modelling routine on disk.
 
 
     Parameters
@@ -48,7 +48,7 @@ def save_input(fname, data, **kwargs):
 
     data : dict
         Dictionary containing the parameters with their corresponding values
-        for an empymod modelling routine.
+        for an empygrad modelling routine.
 
     kwargs : optional
         Passed through to the saving method.
@@ -113,7 +113,7 @@ def load_input(fname):
 
 
 def save_data(fname, data, **kwargs):
-    """Save results from empymod.
+    """Save results from empygrad.
 
 
     Parameters
@@ -126,7 +126,7 @@ def save_data(fname, data, **kwargs):
         - ``.json``: Uses json to store inputs to a plain text file.
 
     data : ndarray
-        The output from an empymod modelling routine.
+        The output from an empygrad modelling routine.
         Note: You must set ``squeeze=False`` when calling the modelling
         routine, to obtain a 3D array (in case any of ``src``, ``rec``, or
         ``freqtime`` has only one entry).
@@ -153,7 +153,7 @@ def save_data(fname, data, **kwargs):
     shape = data.shape
     meta = {
         "date": f"{time.strftime('%a %b %d %H:%M:%S %Y %Z')}",
-        "version": f"empymod v{utils.__version__}",
+        "version": f"empygrad v{utils.__version__}",
         "shape": str(shape),
         "dtype": str(data.dtype),
         "info": kwargs.pop("info", "")
@@ -194,7 +194,7 @@ def save_data(fname, data, **kwargs):
 
 
 def load_data(fname):
-    """Load results from empymod stored with ``save_data``.
+    """Load results from empygrad stored with ``save_data``.
 
 
     Parameters

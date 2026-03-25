@@ -13,7 +13,7 @@ https://github.com/emsig/article-fdesign.
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -93,9 +93,9 @@ class DigitalFilter:
 
         Examples
         --------
-        >>> import empymod
+        >>> import empygrad
         >>> # Load a filter
-        >>> filt = empymod.filters.Hankel().wer_201_2018
+        >>> filt = empygrad.filters.Hankel().wer_201_2018
         >>> # Save it to pure ASCII-files
         >>> filt.tofile()
         >>> # This will save the following three files:
@@ -132,10 +132,10 @@ class DigitalFilter:
 
         Examples
         --------
-        >>> import empymod
+        >>> import empygrad
         >>> # Create an empty filter;
         >>> # Name has to be the base of the text files
-        >>> filt = empymod.filters.DigitalFilter('my-filter')
+        >>> filt = empygrad.filters.DigitalFilter('my-filter')
         >>> # Load the ASCII-files
         >>> filt.fromfile()
         >>> # This will load the following three files:
@@ -224,10 +224,10 @@ class Hankel(_BaseFilter):
 
     .. ipython::
 
-       In [1]: import empymod
-          ...: dlf = empymod.filters.Hankel().wer_201_2018
+       In [1]: import empygrad
+          ...: dlf = empygrad.filters.Hankel().wer_201_2018
 
-       In [2]: H = empymod.filters.Hankel()
+       In [2]: H = empygrad.filters.Hankel()
           ...: H.wer_201_2018.name
        Out[2]: 'wer_201_2018'
 
@@ -270,10 +270,10 @@ class Fourier(_BaseFilter):
 
     .. ipython::
 
-       In [1]: import empymod
-          ...: dlf = empymod.filters.Fourier().key_201_2012
+       In [1]: import empygrad
+          ...: dlf = empygrad.filters.Fourier().key_201_2012
 
-       In [2]: F = empymod.filters.Fourier()
+       In [2]: F = empygrad.filters.Fourier()
           ...: F.key_201_2012.name
        Out[2]: 'key_201_2012'
 
@@ -315,8 +315,8 @@ def _deprecate_filter(func):
 
         # Throw warning.
         msg = (
-            f"Calling `empymod.filters.{name}()` is deprecated and will be "
-            f"removed in v3.0; use `empymod.filters.{ftype}().{new}`."
+            f"Calling `empygrad.filters.{name}()` is deprecated and will be "
+            f"removed in v3.0; use `empygrad.filters.{ftype}().{new}`."
         )
         warnings.warn(msg, DeprecationWarning)
 

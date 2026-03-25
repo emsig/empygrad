@@ -3,7 +3,7 @@ Entry point for the command-line interface (CLI).
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -67,7 +67,7 @@ def main(args=None):
         "--report",
         action="store_true",
         default=False,
-        help="show the empymod report and exit"
+        help="show the empygrad report and exit"
     )
 
     # arg: Version
@@ -75,24 +75,24 @@ def main(args=None):
         "--version",
         action="store_true",
         default=False,
-        help="show the empymod version and exit"
+        help="show the empygrad version and exit"
     )
 
     # Get command line arguments.
     args_dict = vars(parser.parse_args(args))
 
-    # empymod version info.
-    if args_dict.pop('version'):  # empymod version info.
-        print(f"empymod v{utils.__version__}")
+    # empygrad version info.
+    if args_dict.pop('version'):  # empygrad version info.
+        print(f"empygrad v{utils.__version__}")
 
-    # empymod report.
+    # empygrad report.
     elif args_dict.pop('report'):
         print(utils.Report())
 
     # Info if not at list routine and input provided.
     elif len(sys.argv) < 3:
-        print(f"{parser.description}\n=> Type `empymod --help` for "
-              f"more info (empymod v{utils.__version__}).")
+        print(f"{parser.description}\n=> Type `empygrad --help` for "
+              f"more info (empygrad v{utils.__version__}).")
 
     # Actually compute.
     else:
@@ -103,9 +103,9 @@ def main(args=None):
 
 
 def run(args_dict):
-    """Run empymod with provided arguments."""
+    """Run empygrad with provided arguments."""
 
-    # Run empymod, enforce ``squeeze=False``.
+    # Run empygrad, enforce ``squeeze=False``.
     iname = args_dict['input']
     fct = args_dict['routine']
     out = getattr(model, fct)(**{**io.load_input(iname), 'squeeze': False})
@@ -113,7 +113,7 @@ def run(args_dict):
     # Store or print result.
     outfile = args_dict.pop('output')
     if outfile:
-        info = f"Generated with <empymod.{fct}()> from input <{iname}>."
+        info = f"Generated with <empygrad.{fct}()> from input <{iname}>."
         io.save_data(outfile, out, info=info)
     else:
         print(out)

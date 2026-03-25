@@ -13,7 +13,7 @@ root directory for more information regarding the involved licenses.
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -89,7 +89,7 @@ def hankel_dlf(zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab, etaH, etaV,
     code distributed with [Key12]_.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     Returns
@@ -157,7 +157,7 @@ def hankel_qwe(zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab, etaH, etaV,
     for which QWE is not suited.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     Returns
@@ -433,7 +433,7 @@ def hankel_quad(zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab, etaH, etaV,
     methods. However, it might work in some areas where the others fail.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     Returns
@@ -513,7 +513,7 @@ def fourier_dlf(fEM, time, freq, ftarg):
     Sine-filters; see :func:`hankel_dlf` for more information.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     This function is based on `get_CSEM1D_TD_FHT.m` from the source code
@@ -548,7 +548,7 @@ def fourier_qwe(fEM, time, freq, ftarg):
     :func:`hankel_qwe` for more information.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     This function is based on `get_CSEM1D_TD_QWE.m` from the source code
@@ -676,7 +676,7 @@ def fourier_fftlog(fEM, time, freq, ftarg):
     Furthermore, `q` is restricted to -1 <= q <= 1.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     Returns
@@ -800,7 +800,7 @@ def fourier_fft(fEM, time, freq, ftarg):
     r"""Fourier Transform using the Fast Fourier Transform.
 
     The function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     Returns

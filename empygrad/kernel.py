@@ -1,5 +1,5 @@
 """
-Kernel of empymod, calculates the wavenumber-domain electromagnetic
+Kernel of empygrad, calculates the wavenumber-domain electromagnetic
 response. Plus analytical full- and half-space solutions.
 
 The functions :func:`wavenumber`, :func:`angle_factor`, :func:`fullspace`,
@@ -14,7 +14,7 @@ root directory for more information regarding the involved licenses.
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -63,7 +63,7 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
 
     [HuTS15]_ uses Bessel functions of orders 0, 1, and 2 (:math:`J_0, J_1,
     J_2`). The implementations of the *Fast Hankel Transform* and the
-    *Quadrature-with-Extrapolation* in :mod:`empymod.transform` are set-up with
+    *Quadrature-with-Extrapolation* in :mod:`empygrad.transform` are set-up with
     Bessel functions of order 0 and 1 only. This is achieved by applying the
     recurrence formula
 
@@ -82,8 +82,8 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
         for offsets that are not in line with each other.
 
     This function is called from one of the Hankel functions in
-    :mod:`empymod.transform`.  Consult the modelling routines in
-    :mod:`empymod.model` for a description of the input and output parameters.
+    :mod:`empygrad.transform`.  Consult the modelling routines in
+    :mod:`empygrad.model` for a description of the input and output parameters.
 
     If you are solely interested in the wavenumber-domain solution you can call
     this function directly. However, you have to make sure all input arguments
@@ -712,8 +712,8 @@ def angle_factor(angle, ab, msrc, mrec):
     Eqs 105-107, 111-116, 119-121, 123-128.
 
     This function is called from one of the Hankel functions in
-    :mod:`empymod.transform`.  Consult the modelling routines in
-    :mod:`empymod.model` for a description of the input and output parameters.
+    :mod:`empygrad.transform`.  Consult the modelling routines in
+    :mod:`empygrad.model` for a description of the input and output parameters.
 
     """
 
@@ -773,7 +773,7 @@ def fullspace(off, angle, zsrc, zrec, etaH, etaV, zetaH, zetaV, ab, msrc,
     `Gin61.F90`, and `Gin62.F90`.
 
     This function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and output parameters.
 
     """
@@ -945,7 +945,7 @@ def halfspace(off, angle, zsrc, zrec, etaH, etaV, freqtime, ab, signal,
     diffusive approximation. See `solution`-parameter.
 
     This function is called from one of the modelling routines in
-    :mod:`empymod.model`. Consult these modelling routines for a description of
+    :mod:`empygrad.model`. Consult these modelling routines for a description of
     the input and solution parameters.
 
     """

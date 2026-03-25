@@ -1,13 +1,13 @@
 r"""
-This add-on for empymod adjusts [HuTS15]_ for TM/TE-split. The development was
+This add-on for empygrad adjusts [HuTS15]_ for TM/TE-split. The development was
 initiated by the development of
 https://github.com/emsig/csem-ziolkowski-and-slob ([ZiSl19]_).
 
-This is a stripped-down version of empymod with a lot of simplifications
-but an important addition. The modeller empymod returns the total field,
+This is a stripped-down version of empygrad with a lot of simplifications
+but an important addition. The modeller empygrad returns the total field,
 hence not distinguishing between TM and TE mode, and even less between up- and
 down-going fields. The reason behind this is simple: The derivation of
-[HuTS15]_, on which empymod is based, returns the total field. In this
+[HuTS15]_, on which empygrad is based, returns the total field. In this
 derivation each mode (TM and TE) contains non-physical contributions. The
 non-physical contributions have opposite signs in TM and TE, so they cancel
 each other out in the total field. However, in order to obtain the correct TM
@@ -15,15 +15,15 @@ and TE contributions one has to remove these non-physical parts.
 
 This is what this routine does, but only for an x-directed electric source with
 an x-directed electric receiver, and in the frequency domain (src and rec in
-same layer). This version of :func:`empymod.dipole` returns the signal
+same layer). This version of :func:`empygrad.dipole` returns the signal
 separated into TM++, TM+-, TM-+, TM--, TE++, TE+-, TE-+, and TE-- as well as
 the direct field TM and TE contributions. The first superscript denotes the
 direction in which the field diffuses towards the receiver and the second
 superscript denotes the direction in which the field diffuses away from the
 source. For both the plus-sign indicates the field diffuses in the downward
 direction and the minus-sign indicates the field diffuses in the upward
-direction. It uses empymod wherever possible. See the corresponding functions
-in empymod for more explanation and documentation regarding input parameters.
+direction. It uses empygrad wherever possible. See the corresponding functions
+in empygrad for more explanation and documentation regarding input parameters.
 There are important limitations:
 
 - `ab` == 11                   [=> x-directed el. source & el. receivers]
@@ -41,7 +41,7 @@ There are important limitations:
 Theory
 ------
 
-The derivation of [HuTS15]_, on which empymod is based, returns the total
+The derivation of [HuTS15]_, on which empygrad is based, returns the total
 field. Internally it also calculates TM and TE modes, and sums these up.
 However, the separation into TM and TE mode introduces a singularity at
 :math:`\kappa = 0`. It has no contribution in the space-frequency domain to the
@@ -50,7 +50,7 @@ sign (so they cancel each other out in the total field). In order to obtain the
 correct TM and TE contributions one has to remove these non-physical parts.
 
 This routine removes the non-physical part. It is basically a heavily
-simplified version of empymod with the following limitations outlined above.
+simplified version of empygrad with the following limitations outlined above.
 
 It returns the signal separated into TM++, TM+-, TM-+, TM--, TE++, TE+-, TE-+,
 and TE-- as well as the direct field TM and TE contributions. The first
@@ -58,8 +58,8 @@ superscript denotes the direction in which the field diffuses towards the
 receiver and the second superscript denotes the direction in which the field
 diffuses away from the source. For both the plus-sign indicates the field
 diffuses in the downward direction and the minus-sign indicates the field
-diffuses in the upward direction. The routine uses empymod wherever possible,
-see the corresponding functions in empymod for more explanation and
+diffuses in the upward direction. The routine uses empygrad wherever possible,
+see the corresponding functions in empygrad for more explanation and
 documentation regarding input parameters.
 
 Please note that the notation in [HuTS15]_ differs from the notation in
@@ -330,7 +330,7 @@ can use
 """
 # Copyright 2016 The emsig community.
 #
-# This file is part of empymod.
+# This file is part of empygrad.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License.  You may obtain a copy
@@ -362,7 +362,7 @@ def dipole(src, rec, depth, res, freqtime, aniso=None, eperm=None, mperm=None,
            verb=2):
     r"""Return the electromagnetic field due to a dipole source.
 
-    This is a modified version of :func:`empymod.model.dipole`. It returns the
+    This is a modified version of :func:`empygrad.model.dipole`. It returns the
     separated contributions of TM--, TM-+, TM+-, TM++, TMdirect, TE--, TE-+,
     TE+-, TE++, and TEdirect.
 
@@ -387,7 +387,7 @@ def dipole(src, rec, depth, res, freqtime, aniso=None, eperm=None, mperm=None,
 
     freqtime : float
         Frequency f (Hz). (The name `freqtime` is kept for consistency with
-        :func:`empymod.model.dipole`. Only one frequency at once.
+        :func:`empygrad.model.dipole`. Only one frequency at once.
 
     aniso : array_like, optional
         Anisotropies lambda = sqrt(rho_v/rho_h) (-); #aniso = #res.
@@ -565,7 +565,7 @@ def dipole(src, rec, depth, res, freqtime, aniso=None, eperm=None, mperm=None,
 def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd):
     r"""Calculate Green's function for TM and TE.
 
-    This is a modified version of empymod.kernel.greenfct(). See the original
+    This is a modified version of empygrad.kernel.greenfct(). See the original
     version for more information.
 
     """
@@ -623,7 +623,7 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd):
 def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, TM):
     r"""Calculate Pu+, Pu-, Pd+, Pd-.
 
-    This is a modified version of empymod.kernel.fields(). See the original
+    This is a modified version of empygrad.kernel.fields(). See the original
     version for more information.
 
     """
