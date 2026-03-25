@@ -3,7 +3,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 import empygrad
-from empygrad import io, filters
+from empymod import io, filters
 
 
 class TestSaveLoadInput:
@@ -82,7 +82,7 @@ class TestSaveLoadData:
                 text = f.read()
 
             assert 'date' in text
-            assert 'empygrad v' in text
+            assert 'empymod v' in text #TODO fix
             assert 'shape' in text
             assert '(4, 7, 3)' in text
             assert str(orig.dtype) in text
