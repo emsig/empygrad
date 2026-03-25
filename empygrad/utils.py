@@ -34,7 +34,7 @@ from timeit import default_timer
 from datetime import timedelta, datetime
 
 # Relative imports
-from empygrad import filters, transform
+from empymod import filters, transform
 from scooby import Report as ScoobyReport
 
 # Version: We take care of it here instead of in __init__, so we can use it
@@ -901,65 +901,6 @@ def check_model(depth, res, aniso, epermH, epermV, mpermH, mpermV, xdirect,
             print("   direct field    :  Comp. in wavenumber domain")
 
     return depth, res, aniso, epermH, epermV, mpermH, mpermV, isfullspace
-
-
-def check_loop(loop, ht, htarg, verb):
-    r"""Check loop parameter.
-
-    This check-function is called from one of the modelling routines in
-    :mod:`empygrad.model`. Consult these modelling routines for a detailed
-    description of the input parameters.
-
-    Parameters
-    ----------
-    loop : {None, 'freq', 'off'}
-        Loop flag.
-
-    ht : {'dlf', 'qwe', 'quad'}
-        Flag to choose the Hankel transform.
-
-    htarg : dict
-        Arguments of Hankel transform; depends on the value for `ht`.
-
-    verb : {0, 1, 2, 3, 4}
-        Level of verbosity.
-
-
-    Returns
-    -------
-    loop_freq : bool
-        Boolean if to loop over frequencies.
-
-    loop_off : bool
-        Boolean if to loop over offsets.
-
-    """
-
-    # Define if to loop over frequencies or over offsets
-    lagged_splined_dlf = False
-    if ht == 'dlf':
-        if htarg['pts_per_dec'] != 0:
-            lagged_splined_dlf = True
-
-    if ht in ['qwe', 'quad'] or lagged_splined_dlf:
-        loop_freq = True
-        loop_off = False
-    else:
-        loop_off = loop == 'off'
-        loop_freq = loop == 'freq'
-
-    # If verbose, print loop information
-    if verb > 2:
-
-        if loop_off:
-            print("   Loop over       :  Offsets")
-        elif loop_freq:
-            print("   Loop over       :  Frequencies")
-        else:
-            print("   Loop over       :  None (all vectorized)")
-
-    return loop_freq, loop_off
-
 
 def check_time(time, signal, ft, ftarg, verb, new=False):
     r"""Check time domain specific input parameters.

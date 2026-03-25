@@ -51,18 +51,18 @@ The modelling routines make use of the following two core routines:
 # License for the specific language governing permissions and limitations under
 # the License.
 import copy
-import warnings
 
 import numpy as np
 
-from empygrad import kernel, transform
+from empygrad import kernel
 from empygrad.utils import (
         check_time, check_time_only, check_model, check_frequency,
         check_hankel, check_loop, check_dipole, check_bipole, check_ab,
         check_solution, get_abs, get_geo_fact, get_azm_dip, get_off_ang,
         get_layer_nr, get_kwargs, printstartfinish, conv_warning, EMArray)
+from empymod import transform
 
-__all__ = ['bipole', 'dipole', 'loop', 'analytical', 'gpr', 'dipole_k',
+__all__ = ['bipole', 'dipole', 'analytical', 'gpr', 'dipole_k',
            'ip_and_q', 'fem', 'tem']
 
 
@@ -920,26 +920,6 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     printstartfinish(verb, t0, kcount)
 
     return EMArray(EM)
-
-
-def loop(src, rec, depth, res, freqtime, signal=None, aniso=None, epermH=None,
-         epermV=None, mpermH=None, mpermV=None, mrec=True, recpts=1,
-         strength=0, **kwargs):
-    r"""Deprecated function for magnetic flux.
-
-    Use :func:`empygrad.model.bipole` with ``msrc='b'`` and the relevant
-    ``mrec`` instead.
-    """
-    msg = (
-        "Calling `empygrad.model.loop` is deprecated and will be removed in "
-        "v3.0; use `empygrad.model.bipole` with `msrc='b'` and the relevant "
-        "`mrec` instead."
-    )
-    warnings.warn(msg, DeprecationWarning)
-    return bipole(src, rec, depth, res, freqtime, signal, aniso, epermH,
-                  epermV, mpermH, mpermV, mrec=mrec, recpts=recpts,
-                  strength=strength, **{**kwargs, 'msrc': 'b', 'srcpts': 1})
-
 
 def analytical(src, rec, res, freqtime, solution='fs', signal=None, ab=11,
                aniso=None, epermH=None, epermV=None, mpermH=None, mpermV=None,
