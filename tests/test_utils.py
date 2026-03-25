@@ -1167,7 +1167,7 @@ def test_printstartfinish(capsys):
 
     utils.printstartfinish(3, t0)
     out, _ = capsys.readouterr()
-    assert out[:27] == "\n:: empygrad END; runtime = "
+    assert out[:27] == "\n:: empygrad END; runtime ="
 
     utils.printstartfinish(3, t0, 13)
     out, _ = capsys.readouterr()
