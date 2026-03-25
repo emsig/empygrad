@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 from contextlib import ContextDecorator
 
 import empygrad
+from empymod import io
 from empygrad.__main__ import run
 
 
@@ -79,7 +80,7 @@ class TestRun:
             'strength': np.pi,
             'srcpts': 5,
         }
-        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
+        io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'bipole',
@@ -87,7 +88,7 @@ class TestRun:
             'output': join(tmpdir, 'out.txt')
         }
         run(args_dict)
-        out = empygrad.io.load_data(join(tmpdir, 'out.txt'))
+        out = io.load_data(join(tmpdir, 'out.txt'))
         assert_allclose(out, empygrad.bipole(**inp))
 
     def test_dipole_stdout(self, tmpdir, capsys):
@@ -101,7 +102,7 @@ class TestRun:
             'freqtime': 10,
             'verb': 1,
         }
-        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
+        io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'dipole',
@@ -114,28 +115,6 @@ class TestRun:
         out = complex(out.strip().strip("[").strip("]"))
         assert_allclose(out, empygrad.dipole(**inp))
 
-    def test_loop_txt(self, tmpdir):
-
-        inp = {
-            'src': [0, 0, 0, 0, 0],
-            'rec': [100, 50, 10, 0, 0],
-            'depth': [-20, 20],
-            'res': [2e14, 1, 100],
-            'freqtime': 0.01,
-        }
-        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
-
-        args_dict = {
-            'routine': 'loop',
-            'input': join(tmpdir, 't.json'),
-            'output': join(tmpdir, 'out.txt')
-        }
-        with pytest.warns(DeprecationWarning, match='in v3.0.'):
-            run(args_dict)
-        out = empygrad.io.load_data(join(tmpdir, 'out.txt'))
-        with pytest.warns(DeprecationWarning, match='in v3.0.'):
-            assert_allclose(out, empygrad.loop(**inp))
-
     def test_analytical_json(self, tmpdir):
 
         inp = {
@@ -144,7 +123,7 @@ class TestRun:
             'res': np.pi,
             'freqtime': np.pi,
         }
-        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
+        io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'analytical',
@@ -152,7 +131,7 @@ class TestRun:
             'output': join(tmpdir, 'out.json')
         }
         run(args_dict)
-        out = empygrad.io.load_data(join(tmpdir, 'out.json'))
+        out = io.load_data(join(tmpdir, 'out.json'))
         assert_allclose(out, empygrad.analytical(**inp))
 
     def test_failure(self, tmpdir):
