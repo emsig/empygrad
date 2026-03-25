@@ -31,7 +31,7 @@ root directory for more information regarding the involved licenses.
 import numpy as np
 import scipy as sp
 
-from empymod import kernel
+from empygrad import kernel
 
 __all__ = ['hankel_dlf', 'hankel_qwe', 'hankel_quad', 'fourier_dlf',
            'fourier_qwe', 'fourier_fftlog', 'fourier_fft', 'dlf', 'qwe',

@@ -55,8 +55,8 @@ import warnings
 
 import numpy as np
 
-from empymod import kernel, transform
-from empymod.utils import (
+from empygrad import kernel, transform
+from empygrad.utils import (
         check_time, check_time_only, check_model, check_frequency,
         check_hankel, check_loop, check_dipole, check_bipole, check_ab,
         check_solution, get_abs, get_geo_fact, get_azm_dip, get_off_ang,

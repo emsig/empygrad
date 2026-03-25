@@ -6,11 +6,11 @@ from numpy.testing import assert_allclose
 
 # Import main modelling routines from empygrad directly to ensure they are in
 # the __init__.py-file.
-from empymod import model
-from empymod import bipole, dipole, analytical, loop
+from empygrad import model
+from empygrad import bipole, dipole, analytical, loop
 # Import rest from model
-from empymod.model import gpr, dipole_k, fem, tem
-from empymod.kernel import fullspace, halfspace
+from empygrad.model import gpr, dipole_k, fem, tem
+from empygrad.kernel import fullspace, halfspace
 
 # These are kind of macro-tests, as they check the final results.
 # I try to use different parameters for each test, to cover a wide range of
@@ -19,7 +19,7 @@ from empymod.kernel import fullspace, halfspace
 
 # Load required data
 # Data generated with create_self.py
-DATAEMPYMOD = np.load(join(dirname(__file__), 'data/empygrad.npz'),
+DATAempygrad = np.load(join(dirname(__file__), 'data/empygrad.npz'),
                       allow_pickle=True)
 # Data generated with create_data/fem_tem.py
 DATAFEMTEM = np.load(join(dirname(__file__), 'data/fem_tem.npz'),
@@ -41,8 +41,8 @@ REGRES = np.load(join(dirname(__file__), 'data/regression.npz'),
 class TestBipole:
     def test_fullspace(self):
         # Comparison to analytical fullspace solution
-        fs = DATAEMPYMOD['fs'][()]
-        fsbp = DATAEMPYMOD['fsbp'][()]
+        fs = DATAempygrad['fs'][()]
+        fsbp = DATAempygrad['fsbp'][()]
         for key in fs:
             # Get fullspace
             fs_res = fullspace(**fs[key])
@@ -53,8 +53,8 @@ class TestBipole:
 
     def test_halfspace(self):
         # Comparison to analytical halfspace solution
-        hs = DATAEMPYMOD['hs'][()]
-        hsbp = DATAEMPYMOD['hsbp'][()]
+        hs = DATAempygrad['hs'][()]
+        hsbp = DATAempygrad['hsbp'][()]
         for key in hs:
             # Get halfspace
             hs_res = halfspace(**hs[key])
@@ -234,7 +234,7 @@ class TestBipole:
         # Comparison to self, to ensure nothing changed.
         # 4 bipole-bipole cases in EE, ME, EM, MM, all different values
         for i in ['1', '2', '3', '4']:
-            res = DATAEMPYMOD['out'+i][()]
+            res = DATAempygrad['out'+i][()]
             tEM = bipole(**res['inp'])
             assert_allclose(tEM, res['EM'], rtol=5e-5)  # 5e-5 shouldn't be...
 
@@ -1151,7 +1151,7 @@ def test_gpr(capsys):
     # empygrad is not really designed for GPR, you would rather do that straight
     # in the time domain. However, it works. We just run a test here, to check
     # that it remains the status quo.
-    res = DATAEMPYMOD['gprout'][()]
+    res = DATAempygrad['gprout'][()]
     gprout = gpr(**res['inp'])
     out, _ = capsys.readouterr()
     assert 'GPR' in out
@@ -1167,7 +1167,7 @@ def test_gpr(capsys):
 def test_dipole_k():
     # This is like `frequency`, without the Hankel transform. We just run a
     # test here, to check that it remains the status quo.
-    res = DATAEMPYMOD['wout'][()]
+    res = DATAempygrad['wout'][()]
     w_res0, w_res1 = dipole_k(**res['inp'])
     assert_allclose(w_res0, res['PJ0'])
     assert_allclose(w_res1, res['PJ1'])

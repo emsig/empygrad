@@ -10,7 +10,7 @@ More information can be found in the following places:
 - The article about fdesign is in the repo
   https://github.com/emsig/article-fdesign
 - Example notebooks to design a filter can be found in the repo
-  https://empymod.emsig.xyz/en/stable/gallery
+  https://empygrad.emsig.xyz/en/stable/gallery
 
 This filter designing tool uses the direct matrix inversion method as described
 in [Kong07]_ and is based on scripts by [Key12]_. The whole project of
@@ -235,10 +235,10 @@ import numpy as np
 import scipy as sp
 from copy import deepcopy as dc
 
-from empymod.filters import DigitalFilter
-from empymod.model import dipole, dipole_k
-from empymod.filters import Hankel, Fourier
-from empymod.utils import printstartfinish, timedelta, default_timer
+from empygrad.filters import DigitalFilter
+from empygrad.model import dipole, dipole_k
+from empygrad.filters import Hankel, Fourier
+from empygrad.utils import printstartfinish, timedelta, default_timer
 
 __all__ = ['design', 'save_filter', 'load_filter', 'plot_result',
            'print_result', 'Ghosh', 'j0_1', 'j0_2', 'j0_3', 'j0_4', 'j0_5',
@@ -271,7 +271,7 @@ def design(n, spacing, shift, fI, fC=False, r=None, r_def=(1, 1, 2), reim=None,
     substantially.
 
     Example notebooks of its usage can be found in the documentation-gallery,
-    https://empymod.emsig.xyz/en/stable/gallery
+    https://empygrad.emsig.xyz/en/stable/gallery
 
     Parameters
     ----------

@@ -2,8 +2,8 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 
-import empymod
-from empymod import io, filters
+import empygrad
+from empygrad import io, filters
 
 
 class TestSaveLoadInput:
@@ -29,14 +29,14 @@ class TestSaveLoadInput:
         assert inp == out
 
         # Dummy check by comparing the produced result from the two inputs.
-        assert_allclose(empymod.bipole(**inp), empymod.bipole(**out), 0, 0)
+        assert_allclose(empygrad.bipole(**inp), empygrad.bipole(**out), 0, 0)
 
         # Test filter instance
         inp["htarg"] = {"dlf": filters.Hankel().wer_201_2018}
         io.save_input(tmpdir+'/test.json', data=inp)
         out = io.load_input(tmpdir+'/test.json')
         assert out["htarg"]["dlf"] == filters.Hankel().wer_201_2018.name
-        assert_allclose(empymod.bipole(**inp), empymod.bipole(**out), 0, 0)
+        assert_allclose(empygrad.bipole(**inp), empygrad.bipole(**out), 0, 0)
 
     def test_errors(self, tmpdir):
 
@@ -61,7 +61,7 @@ class TestSaveLoadData:
     def test_basic(self, tmpdir):
 
         # Compute
-        orig = empymod.dipole(**self.inp, freqtime=[0.1, 1, 10, 100])
+        orig = empygrad.dipole(**self.inp, freqtime=[0.1, 1, 10, 100])
 
         # Save
         io.save_data(tmpdir+'test.txt', orig, info='Additional info')
@@ -91,7 +91,7 @@ class TestSaveLoadData:
     def test_text(self, tmpdir):
 
         # Compute
-        orig = empymod.dipole(**self.inp, freqtime=[0.1, 1, 10, 100])
+        orig = empygrad.dipole(**self.inp, freqtime=[0.1, 1, 10, 100])
 
         # Save
         io.save_data(tmpdir+'test.txt', orig)

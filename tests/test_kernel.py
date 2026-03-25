@@ -3,8 +3,8 @@ import numpy as np
 from os.path import join, dirname
 from numpy.testing import assert_allclose
 
-from empymod import kernel
-from empymod import bipole
+from empygrad import kernel
+from empygrad import bipole
 
 # No input checks are carried out in kernel, by design. Input checks are
 # carried out in model/utils, not in the core functions kernel/transform.
@@ -14,7 +14,7 @@ from empymod import bipole
 
 # Load required data
 # Data generated with create_data/self.py
-DATAEMPYMOD = np.load(join(dirname(__file__), 'data/empygrad.npz'),
+DATAempygrad = np.load(join(dirname(__file__), 'data/empygrad.npz'),
                       allow_pickle=True)
 # Data generated with create_data/kernel.py
 DATAKERNEL = np.load(join(dirname(__file__), 'data/kernel.npz'),
@@ -106,8 +106,8 @@ def test_angle_factor():                                      # 5. angle_factor
 
 def test_fullspace():                                            # 6. fullspace
     # Compare all to maintain status quo.
-    fs = DATAEMPYMOD['fs'][()]
-    fsres = DATAEMPYMOD['fsres'][()]
+    fs = DATAempygrad['fs'][()]
+    fsres = DATAempygrad['fsres'][()]
     for key in fs:
         # Get fullspace
         fs_res = kernel.fullspace(**fs[key])
@@ -117,9 +117,9 @@ def test_fullspace():                                            # 6. fullspace
 
 def test_halfspace():                                            # 7. halfspace
     # Compare all to maintain status quo.
-    hs = DATAEMPYMOD['hs'][()]
-    hsres = DATAEMPYMOD['hsres'][()]
-    hsbp = DATAEMPYMOD['hsbp'][()]
+    hs = DATAempygrad['hs'][()]
+    hsres = DATAempygrad['hsres'][()]
+    hsbp = DATAempygrad['hsbp'][()]
     for key in hs:
         # Get halfspace
         hs_res = kernel.halfspace(**hs[key])

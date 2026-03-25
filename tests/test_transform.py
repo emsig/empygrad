@@ -3,7 +3,7 @@ import numpy as np
 from os.path import join, dirname
 from numpy.testing import assert_allclose
 
-from empymod import transform, filters, kernel, utils
+from empygrad import transform, filters, kernel, utils
 
 # No input checks are carried out in transform, by design. Input checks are
 # carried out in model/utils, not in the core functions kernel/transform.

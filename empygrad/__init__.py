@@ -15,22 +15,22 @@
 # the License.
 
 # Import all modules
-from empymod import io
-from empymod import model
-from empymod import utils
-from empymod import kernel
-from empymod import filters
-from empymod import scripts
-from empymod import transform
+from empygrad import io
+from empygrad import model
+from empygrad import utils
+from empygrad import kernel
+from empygrad import filters
+from empygrad import scripts
+from empygrad import transform
 
 # Import most important functions
-from empymod.filters import DigitalFilter
-from empymod.model import bipole, dipole, loop, ip_and_q
-from empymod.utils import EMArray, set_minimum, get_minimum, Report
+from empygrad.filters import DigitalFilter
+from empygrad.model import bipole, dipole, loop, ip_and_q
+from empygrad.utils import EMArray, set_minimum, get_minimum, Report
 
 # For top-namespace
-from empymod.scripts import fdesign, tmtemod
-from empymod.model import analytical, gpr, dipole_k, fem, tem
+from empygrad.scripts import fdesign, tmtemod
+from empygrad.model import analytical, gpr, dipole_k, fem, tem
 
 __all__ = ['model', 'utils', 'filters', 'transform', 'kernel', 'scripts', 'io',
            'bipole', 'dipole', 'loop', 'ip_and_q', 'EMArray', 'set_minimum',

@@ -3,8 +3,8 @@ import numpy as np
 from numpy.testing import assert_allclose
 from scipy.constants import mu_0, epsilon_0
 
-from empymod.scripts import tmtemod
-from empymod import kernel, filters, dipole
+from empygrad.scripts import tmtemod
+from empygrad import kernel, filters, dipole
 
 # We only check that the summed return values in the functions in tmtemod agree
 # with the corresponding functions from empygrad. Nothing more. The examples are

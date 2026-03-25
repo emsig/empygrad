@@ -25,7 +25,7 @@ import time
 import numpy as np
 
 
-from empymod import utils, filters
+from empygrad import utils, filters
 
 __all__ = ["save_input", "load_input", "save_data", "load_data"]
 

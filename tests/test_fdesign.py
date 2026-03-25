@@ -12,8 +12,8 @@ try:
 except ImportError:
     plt = False
 
-from empymod import filters, model
-from empymod.scripts import fdesign
+from empygrad import filters, model
+from empygrad.scripts import fdesign
 
 
 # Load required data

@@ -5,8 +5,8 @@ from os.path import join
 from numpy.testing import assert_allclose
 from contextlib import ContextDecorator
 
-import empymod
-from empymod.__main__ import run
+import empygrad
+from empygrad.__main__ import run
 
 
 class disable_numba(ContextDecorator):
@@ -42,7 +42,7 @@ def test_main(script_runner):
     # Exclude time to avoid errors.
     # Exclude empygrad-version (after 300), because if run locally without
     # having empygrad installed it will be "unknown" for the __main__ one.
-    assert empymod.utils.Report().__repr__()[115:300] in ret.stdout
+    assert empygrad.utils.Report().__repr__()[115:300] in ret.stdout
 
     # version        -- VIA empygrad/__main__.py by calling the folder empygrad.
     ret = script_runner.run(['python', 'empygrad', '--version'])
@@ -79,7 +79,7 @@ class TestRun:
             'strength': np.pi,
             'srcpts': 5,
         }
-        empymod.io.save_input(join(tmpdir, 't.json'), inp)
+        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'bipole',
@@ -87,8 +87,8 @@ class TestRun:
             'output': join(tmpdir, 'out.txt')
         }
         run(args_dict)
-        out = empymod.io.load_data(join(tmpdir, 'out.txt'))
-        assert_allclose(out, empymod.bipole(**inp))
+        out = empygrad.io.load_data(join(tmpdir, 'out.txt'))
+        assert_allclose(out, empygrad.bipole(**inp))
 
     def test_dipole_stdout(self, tmpdir, capsys):
 
@@ -101,7 +101,7 @@ class TestRun:
             'freqtime': 10,
             'verb': 1,
         }
-        empymod.io.save_input(join(tmpdir, 't.json'), inp)
+        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'dipole',
@@ -112,7 +112,7 @@ class TestRun:
         run(args_dict)
         out, _ = capsys.readouterr()
         out = complex(out.strip().strip("[").strip("]"))
-        assert_allclose(out, empymod.dipole(**inp))
+        assert_allclose(out, empygrad.dipole(**inp))
 
     def test_loop_txt(self, tmpdir):
 
@@ -123,7 +123,7 @@ class TestRun:
             'res': [2e14, 1, 100],
             'freqtime': 0.01,
         }
-        empymod.io.save_input(join(tmpdir, 't.json'), inp)
+        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'loop',
@@ -132,9 +132,9 @@ class TestRun:
         }
         with pytest.warns(DeprecationWarning, match='in v3.0.'):
             run(args_dict)
-        out = empymod.io.load_data(join(tmpdir, 'out.txt'))
+        out = empygrad.io.load_data(join(tmpdir, 'out.txt'))
         with pytest.warns(DeprecationWarning, match='in v3.0.'):
-            assert_allclose(out, empymod.loop(**inp))
+            assert_allclose(out, empygrad.loop(**inp))
 
     def test_analytical_json(self, tmpdir):
 
@@ -144,7 +144,7 @@ class TestRun:
             'res': np.pi,
             'freqtime': np.pi,
         }
-        empymod.io.save_input(join(tmpdir, 't.json'), inp)
+        empygrad.io.save_input(join(tmpdir, 't.json'), inp)
 
         args_dict = {
             'routine': 'analytical',
@@ -152,8 +152,8 @@ class TestRun:
             'output': join(tmpdir, 'out.json')
         }
         run(args_dict)
-        out = empymod.io.load_data(join(tmpdir, 'out.json'))
-        assert_allclose(out, empymod.analytical(**inp))
+        out = empygrad.io.load_data(join(tmpdir, 'out.json'))
+        assert_allclose(out, empygrad.analytical(**inp))
 
     def test_failure(self, tmpdir):
 

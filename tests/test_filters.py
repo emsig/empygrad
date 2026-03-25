@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 
-from empymod import filters
+from empygrad import filters
 
 
 def test_digitalfilter():                                   # 1.a DigitalFilter

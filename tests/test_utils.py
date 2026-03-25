@@ -5,7 +5,7 @@ import subprocess
 import numpy as np
 from numpy.testing import assert_allclose
 
-from empymod import utils, filters
+from empygrad import utils, filters
 
 
 def test_emarray():
