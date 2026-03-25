@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "empymod"
+name = "empygrad"
 description = "Open-source full 3D electromagnetic modeller for 1D VTI media"
 readme = "README.rst"
 requires-python = ">=3.11"
@@ -29,8 +29,8 @@ file = "LICENSE"
 
 [project.urls]
 Homepage = "https://emsig.xyz"
-Documentation = "https://empymod.emsig.xyz"
-Repository = "https://github.com/emsig/empymod"
+Documentation = "https://empygrad.emsig.xyz"
+Repository = "https://github.com/emsig/empygrad"
 
 [project.optional-dependencies]
 docs = [
@@ -57,8 +57,8 @@ tests = [
     "pytest-console-scripts",
 ]
 all = [
-    "empymod[docs]",
-    "empymod[tests]",
+    "empygrad[docs]",
+    "empygrad[tests]",
 ]
 build = [
     "setuptools_scm>=8",
@@ -66,13 +66,13 @@ build = [
 ]
 
 [project.scripts]
-empymod = "empymod.__main__:main"
+empygrad = "empygrad.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["empymod*"]
+include = ["empygrad*"]
 
 [tool.setuptools_scm]
-version_file = "empymod/version.py"
+version_file = "empygrad/version.py"
 
 [tool.flake8]
 per-file-ignores = [
