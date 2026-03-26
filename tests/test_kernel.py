@@ -21,12 +21,13 @@ DATAKERNEL = np.load(join(dirname(__file__), 'data/kernel.npz'),
                      allow_pickle=True)
 
 
-@pytest.mark.parametrize("njit", [True, False])
-def test_wavenumber(njit):                                      # 1. wavenumber
-    if njit:
+# @pytest.mark.parametrize("njit", [False]) # TODO njit True
+def test_wavenumber(njit=False):                                      # 1. wavenumber
+    """if njit:
         wavenumber = kernel.wavenumber
     else:
-        wavenumber = kernel.wavenumber.py_func
+        wavenumber = kernel.wavenumber.py_func"""
+    wavenumber = kernel.wavenumber
 
     dat = DATAKERNEL['wave'][()]
     for _, val in dat.items():
@@ -48,12 +49,13 @@ def test_wavenumber(njit):                                      # 1. wavenumber
             assert out[2] is None
 
 
-@pytest.mark.parametrize("njit", [True, False])
-def test_greenfct(njit):                                          # 2. greenfct
-    if njit:
+# @pytest.mark.parametrize("njit", [False]) # TODO njit True
+def test_greenfct(njit=False):                                          # 2. greenfct
+    """if njit:
         greenfct = kernel.greenfct
     else:
-        greenfct = kernel.greenfct.py_func
+        greenfct = kernel.greenfct.py_func"""
+    greenfct = kernel.greenfct
 
     dat = DATAKERNEL['green'][()]
     for _, val in dat.items():
@@ -66,12 +68,14 @@ def test_greenfct(njit):                                          # 2. greenfct
             assert_allclose(out[1], val[i+1][1])
 
 
-@pytest.mark.parametrize("njit", [True, False])
-def test_reflections(njit):                                    # 3. reflections
-    if njit:
+# @pytest.mark.parametrize("njit", [False]) # TODO njit True
+def test_reflections(njit=False):                                    # 3. reflections
+    """if njit:
         reflections = kernel.reflections
     else:
-        reflections = kernel.reflections.py_func
+        reflections = kernel.reflections.py_func"""
+
+    reflections = kernel.reflections
 
     dat = DATAKERNEL['refl'][()]
     for _, val in dat.items():
@@ -80,12 +84,13 @@ def test_reflections(njit):                                    # 3. reflections
         assert_allclose(Rm, val[2])
 
 
-@pytest.mark.parametrize("njit", [True, False])
-def test_fields(njit):                                              # 4. fields
-    if njit:
+# @pytest.mark.parametrize("njit", [False]) # TODO njit True
+def test_fields(njit=False):                                              # 4. fields
+    """if njit:
         fields = kernel.fields
     else:
-        fields = kernel.fields.py_func
+        fields = kernel.fields.py_func"""
+    fields = kernel.fields
 
     dat = DATAKERNEL['fields'][()]
     for _, val in dat.items():

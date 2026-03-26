@@ -31,22 +31,15 @@ root directory for more information regarding the involved licenses.
 
 import numpy as np
 import scipy as sp
-import numba as nb
 
 __all__ = ['wavenumber', 'angle_factor', 'fullspace', 'greenfct',
            'reflections', 'fields', 'halfspace']
-
-# Numba-settings
-_numba_setting = {'nogil': True, 'cache': True}
-_numba_with_fm = {'fastmath': True, **_numba_setting}
-
 
 def __dir__():
     return __all__
 
 
 # Wavenumber-frequency domain kernel
-
 def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                    lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None):
     r"""Wavenumber-domain solution and optionally its Jacobian w.r.t. horizontal resistivity.
@@ -215,7 +208,6 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         return PJ0, PJ1, PJ0b, jac_PJ0, jac_PJ1, jac_PJ0b
     return PJ0, PJ1, PJ0b
 
-
 def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
              lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None):
     r"""Green's function and optionally its Jacobian w.r.t. horizontal resistivity.
@@ -258,7 +250,6 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
 
     if jac_mode:
         nlayer_res = jac_etaH.shape[2]
-
         # Save pre-swap values for jac_Gam computation.
         # In the MM branch (mrec and msrc), zetaH -> -etaH_orig, etaH -> -zetaH_orig,
         # etaV -> -zetaV_orig, and jac_etaH / jac_etaV are zeroed.  The
@@ -301,6 +292,7 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
 
         # Primal Gam (mirrors upstream greenfct exactly)
         Gam = np.zeros((nfreq, noff, nlayer, nlambda), dtype=etaH.dtype)
+
         for i in range(nfreq):
             for ii in range(noff):
                 for iii in range(nlayer):
@@ -328,7 +320,7 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
             #
             # Use pre-swap etaH/etaV/jac_etaV so the MM branch is handled correctly.
             if TM and not (mrec and msrc):
-                lamsq = lambd[np.newaxis, :, np.newaxis, :, np.newaxis] ** 2
+                lamsq = lambd[np.newaxis, :, np.newaxis, :, np.newaxis]**2
                 eH = etaH_for_gam[:, np.newaxis, :, np.newaxis, np.newaxis]
                 eV = etaV_for_gam[:, np.newaxis, :, np.newaxis, np.newaxis]
                 jH = jac_etaH_for_gam[:, np.newaxis, :, np.newaxis, :]
@@ -683,7 +675,6 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         return GTM, GTE, jac_GTM, jac_GTE
     return GTM, GTE
 
-
 def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None):
     r"""Reflection coefficients and optionally their Jacobian w.r.t. horizontal resistivity.
 
@@ -828,7 +819,6 @@ def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None):
     if jac_mode:
         return Rp, Rm, jac_Rp, jac_Rm
     return Rp, Rm
-
 
 def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                jac_Rp=None, jac_Rm=None, jac_Gam=None):
