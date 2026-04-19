@@ -660,8 +660,95 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
     return EMArray(EM)
 
 
+# ---------------------------------------------------------------------------
+# Jacobian parameter classification
+# ---------------------------------------------------------------------------
+
+# Parameters whose Jacobian flows through d(etaH, etaV)/d(param) seeds.
+_ETA_TYPE_PARAMS = frozenset({'res', 'aniso'})
+
+# Parameters whose Jacobian requires kernel extensions for depth-dependent
+# exponentials (not yet implemented).
+_GEO_TYPE_PARAMS = frozenset({'depth', 'thickness'})
+
+# Source-position parameters (not yet implemented).
+_SRC_POS_PARAMS = frozenset({'src_x', 'src_y', 'src_z'})
+
+_ALL_JAC_PARAMS = _ETA_TYPE_PARAMS | _GEO_TYPE_PARAMS | _SRC_POS_PARAMS
+
+
+def _parse_jac(jac):
+    """Normalise the ``jac`` argument to ``None`` or a list of strings."""
+    if jac is None:
+        return None
+    if isinstance(jac, str):
+        return [jac]
+    return list(jac)
+
+
+def _stacked_eta_seeds(eta_params, etaH, res, aniso):
+    """Compute stacked d(etaH, etaV)/d(param) seed matrices.
+
+    Parameters
+    ----------
+    eta_params : list of str
+        Ordered subset of ``_ETA_TYPE_PARAMS`` to include.
+    etaH : complex ndarray, shape (nfreq, nlayer)
+        Primal etaH — used only to read nfreq, nlayer, and dtype.
+    res, aniso : 1-D float arrays, length nlayer
+        Layer resistivities and anisotropy ratios (after ``check_model``).
+
+    Returns
+    -------
+    jac_etaH, jac_etaV : complex ndarray, shape (nfreq, nlayer, n_total)
+        Stacked seed matrices.  ``n_total = nlayer * len(eta_params)``.
+    param_slices : dict
+        Maps each parameter name to its ``slice`` in the last axis.
+    """
+    nfreq, nlayer = etaH.shape
+    res   = np.asarray(res,   dtype=float)
+    aniso = np.asarray(aniso, dtype=float)
+    idx   = np.arange(nlayer)
+
+    seeds_H, seeds_V, param_slices = [], [], {}
+    col = 0
+
+    for p in eta_params:
+        j_H = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
+        j_V = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
+
+        if p == 'res':
+            # etaH = etaV = iw*eps0*eperm + 1/res  (isotropic horizontal)
+            # d(eta[i,j])/d(res[k]) = -delta(j,k) / res[k]^2
+            diag = -1.0 / res**2
+            j_H[:, idx, idx] = diag
+            j_V[:, idx, idx] = diag
+
+        elif p == 'aniso':
+            # etaV = iw*eps0*epermV + sigma_h/aniso^2;  etaH independent of aniso
+            # d(etaV[i,j])/d(aniso[k]) = -2/(res[k]*aniso[k]^3) * delta(j,k)
+            diag_v = -2.0 / (res * aniso**3)
+            j_V[:, idx, idx] = diag_v
+            # j_H stays zero
+
+        else:
+            raise NotImplementedError(
+                f"Jacobian w.r.t. '{p}' is not yet implemented. "
+                f"Supported eta-type parameters: {sorted(_ETA_TYPE_PARAMS)}.")
+
+        seeds_H.append(j_H)
+        seeds_V.append(j_V)
+        param_slices[p] = slice(col, col + nlayer)
+        col += nlayer
+
+    jac_etaH = np.concatenate(seeds_H, axis=2)
+    jac_etaV = np.concatenate(seeds_V, axis=2)
+    return jac_etaH, jac_etaV, param_slices
+
+
 def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
-           epermH=None, epermV=None, mpermH=None, mpermV=None, **kwargs):
+           epermH=None, epermV=None, mpermH=None, mpermV=None, jac=None,
+           **kwargs):
     r"""Return EM fields due to infinitesimal small EM dipoles.
 
     Calculate the electromagnetic frequency- or time-domain field due to
@@ -796,6 +883,22 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         contain at least the keyword ``'func'``, containing the actual
         function, but can contain any other parameters too.
 
+    jac : {None, str, list of str}, default: None
+        Parameters w.r.t. which Jacobians are computed.  Supported values:
+
+        - ``None`` : return only *EM* (no Jacobian overhead).
+        - ``'res'`` : ``d(EM)/d(res_k)``, shape ``(nfreq, nrec, nlayer)``.
+        - ``'aniso'`` : ``d(EM)/d(aniso_k)``, shape ``(nfreq, nrec, nlayer)``.
+        - ``'depth'`` : not yet implemented.
+        - ``'thickness'`` : not yet implemented.
+        - ``'src_x'``, ``'src_y'``, ``'src_z'`` : not yet implemented.
+
+        If *jac* is a single string, the Jacobian is returned as an ndarray.
+        If *jac* is a list, a ``dict {param: ndarray}`` is returned.
+
+        Restrictions: requires ``signal=None`` (frequency domain) and
+        ``ht='dlf'``; raises ``NotImplementedError`` otherwise.
+
 
     Returns
     -------
@@ -810,6 +913,11 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
         The shape of EM is (nfreqtime, nrec, nsrc). However, single dimensions
         are removed.
+
+    J : ndarray or dict (only returned when *jac* is not ``None``)
+        Jacobian(s).  Shape ``(nfreq, nrec, nlayer)`` per parameter.
+        Returned as a bare ndarray when *jac* is a string, or as a
+        ``dict {param: ndarray}`` when *jac* is a list.
 
 
     Examples
@@ -838,6 +946,19 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         [2, 'dlf', {}, 'dlf', {}, False, None, True, None], kwargs,
     )
     verb, ht, htarg, ft, ftarg, xdirect, loop, squeeze, bandpass = out
+
+    # Parse jac argument early so bad values fail before any computation.
+    jac_params = _parse_jac(jac)
+
+    # Jacobian restrictions — raise before touching any heavy computation.
+    if jac_params is not None:
+        if signal is not None:
+            raise NotImplementedError(
+                "Jacobian w.r.t. time-domain response is not yet implemented; "
+                "use signal=None.")
+        if ht != 'dlf':
+            raise NotImplementedError(
+                "Jacobian computation requires ht='dlf'.")
 
     # === 1.  LET'S START ============
     t0 = printstartfinish(verb)
@@ -889,6 +1010,13 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     lsrc, zsrc = get_layer_nr(src, depth)
     lrec, zrec = get_layer_nr(rec, depth)
 
+    # Jacobian loop_freq/loop_off guard (Jacobian kernel pass bypasses fem()
+    # looping, so these modes are not yet supported).
+    if jac_params is not None and (loop_freq or loop_off):
+        raise NotImplementedError(
+            "Jacobian computation is not yet implemented for loop_freq or "
+            "loop_off modes.")
+
     # === 3. EM-FIELD CALCULATION ============
 
     # Collect variables for fem
@@ -919,7 +1047,74 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     # === 4.  FINISHED ============
     printstartfinish(verb, t0, kcount)
 
-    return EMArray(EM)
+    EM_out = EMArray(EM)
+
+    if jac_params is None:
+        return EM_out
+
+    # === 5. JACOBIAN COMPUTATION ============
+
+    # Validate requested parameters.
+    unknown = set(jac_params) - _ALL_JAC_PARAMS
+    if unknown:
+        raise ValueError(
+            f"Unknown Jacobian parameter(s): {sorted(unknown)}. "
+            f"Supported: {sorted(_ALL_JAC_PARAMS)}.")
+
+    geo_params = [p for p in jac_params if p in _GEO_TYPE_PARAMS]
+    if geo_params:
+        raise NotImplementedError(
+            f"Jacobian w.r.t. geometry parameters {geo_params} is not yet "
+            "implemented.")
+
+    src_pos_params = [p for p in jac_params if p in _SRC_POS_PARAMS]
+    if src_pos_params:
+        raise NotImplementedError(
+            f"Jacobian w.r.t. source-position parameters {src_pos_params} "
+            "is not yet implemented.")
+
+    eta_params = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
+
+    # DLF filter points (shared with fem, but fem does not expose them).
+    ang_fact = kernel.angle_factor(angle, ab_calc, msrc, mrec)
+    lambd, int_pts = transform.get_dlf_points(
+        htarg['dlf'], off, htarg['pts_per_dec'])
+
+    # Compute stacked d(etaH, etaV)/d(param) seeds.
+    jac_etaH, jac_etaV, param_slices = _stacked_eta_seeds(
+        eta_params, etaH, res, aniso)
+    n_params = jac_etaH.shape[2]
+
+    # Single kernel pass with all seed columns stacked.
+    _PJ0, _PJ1, _PJ0b, jac_PJ0, jac_PJ1, jac_PJ0b = kernel.wavenumber(
+        zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+        lambd, ab_calc, xdirect, msrc, mrec, jac_etaH, jac_etaV)
+
+    # DLF transform is linear — apply column-by-column over n_params.
+    jac_EM = np.zeros((freq.size, off.size, n_params), dtype=etaH.dtype)
+    for k in range(n_params):
+        jac_PJ_k = (
+            jac_PJ0[:, :, :, k]  if jac_PJ0  is not None else None,
+            jac_PJ1[:, :, :, k]  if jac_PJ1  is not None else None,
+            jac_PJ0b[:, :, :, k] if jac_PJ0b is not None else None,
+        )
+        jac_EM[:, :, k] = transform.dlf(
+            jac_PJ_k, lambd, off, htarg['dlf'], htarg['pts_per_dec'],
+            ang_fact=ang_fact, ab=ab_calc, int_pts=int_pts)
+
+    # Reshape Jacobian to (nfreq, nrec, nsrc, n_params), then drop the nsrc
+    # axis when nsrc=1 (matching empymod's convention for dipole).  We never
+    # squeeze nrec so the parameter axis stays as the last dimension.
+    jac_EM = jac_EM.reshape((-1, nrec, nsrc, n_params), order='F')
+    if nsrc == 1:
+        jac_EM = jac_EM[:, :, 0, :]  # (nfreq, nrec, n_params)
+
+    # Slice into per-parameter arrays and return.
+    jac_out = {p: jac_EM[..., sl] for p, sl in param_slices.items()}
+
+    if isinstance(jac, str):
+        return EM_out, jac_out[jac]
+    return EM_out, jac_out
 
 def analytical(src, rec, res, freqtime, solution='fs', signal=None, ab=11,
                aniso=None, epermH=None, epermV=None, mpermH=None, mpermV=None,
