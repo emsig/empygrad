@@ -7,7 +7,7 @@ from numpy.testing import assert_allclose
 # Import main modelling routines from empygrad directly to ensure they are in
 # the __init__.py-file.
 from empygrad import model
-from empygrad import bipole, dipole, analytical, loop
+from empygrad import bipole, dipole, analytical
 # Import rest from model
 from empygrad.model import gpr, dipole_k, fem, tem
 from empygrad.kernel import fullspace, halfspace
@@ -251,26 +251,6 @@ class TestBipole:
         # r = 100; sI = 33 => 3300
         assert_allclose(bip1, dip*3300, 1e-5)  # bipole as dipole
         assert_allclose(bip2, dip*3300, 1e-2)  # bipole, src/rec switched.
-
-    def test_loop(self, capsys):
-        # Compare loop options: None, 'off', 'freq'
-        inp = {'depth': [0, 500], 'res': [10, 3, 50], 'freqtime': [1, 2, 3],
-               'rec': [[6000, 7000, 8000], [200, 200, 200], 300, 0, 0],
-               'src': [0, 0, 0, 0, 0]}
-
-        non = bipole(loop=None, verb=3, **inp)
-        out, _ = capsys.readouterr()
-        assert "Loop over       :  None (all vectorized)" in out
-
-        lpo = bipole(loop='off', verb=3, **inp)
-        out, _ = capsys.readouterr()
-        assert "Loop over       :  Offsets" in out
-        assert_allclose(non, lpo, equal_nan=True)
-
-        lfr = bipole(loop='freq', verb=3, **inp)
-        out, _ = capsys.readouterr()
-        assert "Loop over       :  Frequencies" in out
-        assert_allclose(non, lfr, equal_nan=True)
 
     def test_hankel(self, capsys):
         # Compare Hankel transforms
