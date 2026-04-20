@@ -4,31 +4,35 @@ from discretize import TensorMesh
 from wbi import wavelet_regularization as regularization
 from scipy.optimize import minimize
 
+from simpeg.regularization import WeightedLeastSquares
+
+
 ##
 
-from empygrad.model import dipole
+from empygrad.model import dipole as dipole_empygrad
+from empymod.model import dipole as dipole_empymod
 
 ## Defining the Model and Mapping
 
 # Here we generate a synthetic model and a mappig which goes from the model
 # space to the row space of our linear operator.
 
-nParam = 50  # Number of model parameters
-fact = 0.1 # factor to stretch the model in depth
-depth = np.linspace(0,20, nParam)*fact
+nParam = 25  # Number of model parameters
+fact = 1 # factor to stretch the model in depth
+depth = np.r_[0, np.logspace(0,np.log10(30), nParam-1)]*fact
 # A 1D mesh
 mesh = TensorMesh([np.r_[np.diff(depth),1]])
 
 # Creating the true model
 true_model = np.ones(nParam)*0.1
-true_model[depth > 6*fact] = 0.15
-true_model[depth > 11*fact] = 0.35
-true_model[depth > 15*fact] = 0.1
+true_model[depth > 3*fact] = 0.15
+true_model[depth > 6*fact] = 0.35
+true_model[depth > 12*fact] = 0.1
 
 # Plotting the true model
 fig = plt.figure(figsize=(8, 5))
 ax = fig.add_subplot(111)
-ax.plot(depth, true_model, "b-")
+ax.plot(depth, true_model, "b-", drawstyle="steps-post")
 ax.set_ylim([0, 1])
 plt.show()
 
@@ -37,14 +41,14 @@ plt.show()
 
 EC = np.r_[1e-8, true_model]  # Adding the air-layer
 s = np.arange(1,40)
-freq = 100
+freq = 1600
 d = depth
 
 inpdat = {'src': [0, 0, 0.1, ], 'rec': [s, np.zeros(s.shape), 0.1, ],
           'depth': d, 'freqtime': freq, 'aniso': np.ones(EC.size),
         'verb': 1,'ab': 11}
 
-F, J = dipole(**inpdat, res=1/np.r_[1e-8, true_model], jac='res')
+F, J = dipole_empygrad(**inpdat, res=1/np.r_[1e-8, true_model], jac='res')
 
 plt.plot(F.imag, "ro-")
 plt.show()
@@ -53,7 +57,7 @@ plt.figure()
 plt.plot(depth, J[0,0, 1:].imag, "ko-")
 ax = plt.gca()
 ax1 = ax.twinx()
-ax1.plot(depth, true_model, "b-")
+ax1.plot(depth, true_model, "b-", drawstyle="steps-post")
 plt.show()
 
 ## Predict Synthetic Data
@@ -62,13 +66,12 @@ plt.show()
 # invert.
 
 # Standard deviation of Gaussian noise being added
-std = 0.01
+std = 0.05
 np.random.seed(42)
 dclean = F.imag
-dobs = dclean
+dobs = dclean + std * dclean * np.random.randn(*dclean.shape) # Adding noise to the data
 nd = dobs.size
 W = 1/(std*dobs) # reciprocals of estimated noise
-
 
 # Define the Inverse Problem
 # The inverse problem is defined by 3 things:
@@ -84,12 +87,12 @@ W = 1/(std*dobs) # reciprocals of estimated noise
 
 def dmisfit(m):
     res = 1/np.r_[1e-8, m]
-    F = dipole(**inpdat, res=res).imag
+    F = dipole_empymod(**inpdat, res=res).imag
     return 1 / nd * np.linalg.norm(W * (F - dobs)) ** 2
 
 def dmisfit_deriv(m):
     res = 1/np.r_[1e-8, m]
-    F, J = dipole(**inpdat, res=res, jac='res')
+    F, J = dipole_empygrad(**inpdat, res=res, jac='res')
     F = F.imag
     J = J[0,:, :].imag
     #Removing the air-layer
@@ -120,7 +123,10 @@ print("Gradient check: ", check_grad(dmisfit, dmisfit_deriv, np.ones(nParam)))
 # - db5+ = rather smooth
 
 reg = regularization.WaveletRegularization1D(mesh, wav="db1")
-beta = 1e3
+beta = 5e1
+# Smooth regularization
+# reg = WeightedLeastSquares(mesh, alpha_s=0)
+# beta = 1e3
 
 def phi(m):
     m = np.exp(m) # We work in log-domain to ensure positive EC-values
@@ -133,26 +139,25 @@ def jac(m):
     return deriv * np.exp(m)
 
 starting_model = np.ones(nParam)*np.log(0.2) # Note, we work in log-domain to ensure positive EC-values
-x = minimize(phi, starting_model, jac=jac, method='L-BFGS-B', options={'maxiter':200} )
+x = minimize(phi, starting_model, jac=jac, method='L-BFGS-B', options={'maxiter':200, 'ftol': 1e-4} )
 
 m = x.x
 
 ## Plotting Results
-
 # Observed versus predicted data
 fig, ax = plt.subplots(1, 2, figsize=(12 * 1.2, 4 * 1.2))
 ax[0].semilogy(-dobs, "b-")
-ax[0].plot(-dipole(**inpdat, res=1/np.r_[1e-8, np.exp(starting_model)]).imag, "k-")
-ax[0].plot(-dipole(**inpdat, res=1/np.r_[1e-8, np.exp(x.x)]).imag, "r-")
+ax[0].plot(-dipole_empymod(**inpdat, res=1/np.r_[1e-8, np.exp(starting_model)]).imag, "k-")
+ax[0].plot(-dipole_empymod(**inpdat, res=1/np.r_[1e-8, np.exp(x.x)]).imag, "r-")
 ax[0].legend(("Observed Data","Starting Model", "Predicted Data"))
 
 # True versus recovered model
-ax[1].plot(mesh.cell_centers_x, true_model, "b-")
-ax[1].plot(mesh.cell_centers_x, np.exp(starting_model), "k-")
-ax[1].plot(mesh.cell_centers_x, np.exp(x.x), "r-")
+ax[1].plot(mesh.cell_centers_x, true_model, "b-", drawstyle="steps-post", label="True Model")
+ax[1].plot(mesh.cell_centers_x, np.exp(starting_model), "k-", drawstyle="steps-post")
+ax[1].plot(mesh.cell_centers_x, np.exp(x.x), "r-", drawstyle="steps-post")
 ax[1].legend(("True Model", "Starting Model","Recovered Model"))
 # ax[1].set_ylim([-2, 2])
-ax[1].set_title("Wavelet-type " + reg.wavelets.wav)
+# ax[1].set_title("Wavelet-type " + reg.wavelets.wav)
 plt.show()
 
 print('True model: ', dmisfit(true_model))
