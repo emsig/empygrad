@@ -945,10 +945,12 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         If *jac* is a single string, the Jacobian is returned as an ndarray.
         If *jac* is a list, a ``dict {param: ndarray}`` is returned.
 
-        Restrictions: requires ``ht='dlf'``; raises ``NotImplementedError``
-        otherwise.  Time-domain Jacobians (``signal != None``) are supported
-        by applying the Fourier transform column-by-column to the
-        frequency-domain Jacobian (chain rule: ``J_t = FT[J_f]``).
+        The Jacobian always uses DLF internally for the Hankel transform,
+        regardless of the ``ht`` setting.  ``ht='qwe'`` and ``ht='quad'``
+        are fully supported for the primal; the Jacobian is computed with
+        default DLF quadrature, which is accurate for well-conditioned models.
+        Time-domain Jacobians (``signal != None``) apply the Fourier transform
+        column-by-column (chain rule: ``J_t = FT[J_f]``).
 
 
     Returns
@@ -1001,12 +1003,6 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     # Parse jac argument early so bad values fail before any computation.
     jac_params = _parse_jac(jac)
 
-    # Jacobian restrictions — raise before touching any heavy computation.
-    if jac_params is not None:
-        if ht != 'dlf':
-            raise NotImplementedError(
-                "Jacobian computation requires ht='dlf'.")
-
     # === 1.  LET'S START ============
     t0 = printstartfinish(verb)
 
@@ -1056,13 +1052,6 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     # Get layer number in which src and rec reside (lsrc/lrec)
     lsrc, zsrc = get_layer_nr(src, depth)
     lrec, zrec = get_layer_nr(rec, depth)
-
-    # Jacobian loop_freq/loop_off guard (Jacobian kernel pass bypasses fem()
-    # looping, so these modes are not yet supported).
-    if jac_params is not None and (loop_freq or loop_off):
-        raise NotImplementedError(
-            "Jacobian computation is not yet implemented for loop_freq or "
-            "loop_off modes.")
 
     # === 3. EM-FIELD CALCULATION ============
 
@@ -1119,10 +1108,21 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     eta_params   = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
     depth_params = [p for p in jac_params if p in _GEO_DEPTH_PARAMS]
 
-    # DLF filter points (shared with fem, but fem does not expose them).
+    # The Jacobian always uses DLF for the Hankel transform regardless of the
+    # ht setting for the primal.  Reason: kernel.wavenumber() returns PJ arrays
+    # at DLF quadrature points; transform.dlf() is the only post-processor that
+    # takes pre-computed PJ arrays.  hankel_qwe / hankel_quad integrate the
+    # kernel internally and cannot accept pre-computed PJ arrays.
+    # For ht='qwe'/'quad', the primal uses QWE/QUAD while the Jacobian uses
+    # default DLF — both are accurate for well-conditioned models.
+    if ht == 'dlf':
+        htarg_jac = htarg
+    else:
+        _, htarg_jac = check_hankel('dlf', {}, 0)
+
     ang_fact = kernel.angle_factor(angle, ab_calc, msrc, mrec)
     lambd, int_pts = transform.get_dlf_points(
-        htarg['dlf'], off, htarg['pts_per_dec'])
+        htarg_jac['dlf'], off, htarg_jac['pts_per_dec'])
 
     # --- Build eta seeds ---
     if eta_params:
@@ -1230,7 +1230,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
             jac_PJ0b[:, :, :, k] if jac_PJ0b is not None else None,
         )
         jac_EM[:, :, k] = transform.dlf(
-            jac_PJ_k, lambd, off, htarg['dlf'], htarg['pts_per_dec'],
+            jac_PJ_k, lambd, off, htarg_jac['dlf'], htarg_jac['pts_per_dec'],
             ang_fact=ang_fact, ab=ab_calc, int_pts=int_pts)
 
     # Fourier (f→t) transform if time-domain — chain rule: J_t = FT[J_f]
