@@ -665,7 +665,7 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 # ---------------------------------------------------------------------------
 
 # Parameters whose Jacobian flows through d(etaH, etaV)/d(param) seeds.
-_ETA_TYPE_PARAMS = frozenset({'res', 'aniso'})
+_ETA_TYPE_PARAMS = frozenset({'res', 'aniso', 'epermH', 'epermV'})
 
 # Parameters whose Jacobian flows through depth/thickness perturbations.
 _GEO_DEPTH_PARAMS = frozenset({'depth', 'thickness'})
@@ -729,7 +729,7 @@ def _stacked_depth_seeds(depth_params, n_interfaces):
     return np.zeros((n_interfaces, 0)), param_slices
 
 
-def _stacked_eta_seeds(eta_params, etaH, res, aniso):
+def _stacked_eta_seeds(eta_params, etaH, res, aniso, freq):
     """Compute stacked d(etaH, etaV)/d(param) seed matrices.
 
     Parameters
@@ -740,6 +740,9 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso):
         Primal etaH — used only to read nfreq, nlayer, and dtype.
     res, aniso : 1-D float arrays, length nlayer
         Layer resistivities and anisotropy ratios (after ``check_model``).
+    freq : 1-D float array, length nfreq
+        Frequencies (Hz).  Needed for the frequency-dependent seeds of
+        ``epermH`` and ``epermV``.
 
     Returns
     -------
@@ -748,6 +751,7 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso):
     param_slices : dict
         Maps each parameter name to its ``slice`` in the last axis.
     """
+    _EPS0 = 8.8541878128e-12   # vacuum permittivity (F/m)
     nfreq, nlayer = etaH.shape
     res   = np.asarray(res,   dtype=float)
     aniso = np.asarray(aniso, dtype=float)
@@ -773,6 +777,22 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso):
             # d(etaV[i,j])/d(aniso[k]) = -2/(res[k]*aniso[k]^3) * delta(j,k)
             diag_v = -2.0 / (res * aniso**3)
             j_V[:, idx, idx] = diag_v
+            # j_H stays zero
+
+        elif p == 'epermH':
+            # etaH = 1/res + s*eps0*epermH  =>  d(etaH[i,n])/d(epermH[n]) = s[i]*eps0
+            # etaV independent of epermH
+            for i_f in range(nfreq):
+                sval = 2j * np.pi * freq[i_f]
+                j_H[i_f, idx, idx] = sval * _EPS0
+            # j_V stays zero
+
+        elif p == 'epermV':
+            # etaV = 1/(res*aniso^2) + s*eps0*epermV  =>  d(etaV[i,n])/d(epermV[n]) = s[i]*eps0
+            # etaH independent of epermV
+            for i_f in range(nfreq):
+                sval = 2j * np.pi * freq[i_f]
+                j_V[i_f, idx, idx] = sval * _EPS0
             # j_H stays zero
 
         else:
@@ -933,6 +953,8 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         - ``None`` : return only *EM* (no Jacobian overhead).
         - ``'res'`` : ``d(EM)/d(res_k)``, shape ``(nfreq, nrec, nlayer)``.
         - ``'aniso'`` : ``d(EM)/d(aniso_k)``, shape ``(nfreq, nrec, nlayer)``.
+        - ``'epermH'`` : ``d(EM)/d(epermH_k)``, shape ``(nfreq, nrec, nlayer)``.
+        - ``'epermV'`` : ``d(EM)/d(epermV_k)``, shape ``(nfreq, nrec, nlayer)``.
         - ``'depth'`` : ``d(EM)/d(depth[k])``, shape ``(nfreq, nrec, n_interfaces)``
           where ``n_interfaces = len(depth)``; requires ``signal=None``, ``ht='dlf'``.
         - ``'thickness'`` : not yet implemented.
@@ -1127,7 +1149,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     # --- Build eta seeds ---
     if eta_params:
         jac_etaH_eta, jac_etaV_eta, eta_slices = _stacked_eta_seeds(
-            eta_params, etaH, res, aniso)
+            eta_params, etaH, res, aniso, freq)
         n_eta = jac_etaH_eta.shape[2]
     else:
         n_eta = 0
