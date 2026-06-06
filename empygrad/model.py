@@ -62,8 +62,8 @@ from empygrad.utils import (
         get_layer_nr, get_kwargs, printstartfinish, conv_warning, EMArray)
 from empymod import transform
 
-__all__ = ['bipole', 'dipole', 'analytical', 'gpr', 'dipole_k',
-           'ip_and_q', 'fem', 'tem']
+__all__ = ['bipole', 'dipole', 'adjoint_jacobian', 'analytical', 'gpr',
+           'dipole_k', 'ip_and_q', 'fem', 'tem']
 
 
 def __dir__():
@@ -1665,6 +1665,82 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     if isinstance(jac, str):
         return EM_out, jac_out[jac]
     return EM_out, jac_out
+
+
+def _contract_adjoint(J, v):
+    """Return ``J^H @ v`` = sum over data axes of conj(J)*v.
+
+    ``J`` has shape ``(*data_shape, n_param)``; ``v`` has shape
+    ``data_shape``.  Result has shape ``(n_param,)``.
+    """
+    J = np.asarray(J)
+    v = np.asarray(v)
+    n_data_axes = J.ndim - 1
+    data_shape = J.shape[:n_data_axes]
+    if v.shape != data_shape:
+        raise ValueError(
+            f"v has shape {v.shape}, but the Jacobian's data shape is "
+            f"{data_shape}.  v must match the (squeezed) EM/Jacobian layout.")
+    axes = list(range(n_data_axes))
+    return np.tensordot(np.conj(J), v, axes=(axes, axes))
+
+
+def adjoint_jacobian(src, rec, depth, res, freqtime, v, signal=None, ab=11,
+                     aniso=None, epermH=None, epermV=None, mpermH=None,
+                     mpermV=None, jac='res', **kwargs):
+    r"""Apply the transposed Jacobian :math:`J^H` to a data vector ``v``.
+
+    Returns :math:`J^H v = \sum_{\rm data} \overline{J}_{\rm data,k}\,
+    v_{\rm data}`, the action of the (conjugate-)transposed Jacobian on a
+    data-space vector.  This is the quantity needed for the model-space
+    gradient of a data misfit, ``g = J^H r`` for residual ``r``.
+
+    The adjoint identity holds exactly (to machine precision) for real model
+    parameters and complex data:
+
+    .. math::
+        \langle J\,\delta m,\ v\rangle_{\rm data}
+        = \langle \delta m,\ J^H v\rangle_{\rm model},
+
+    with ``<a,b>_data = sum(conj(a)*b)`` and ``<dm,w>_model = sum(dm*w)``.
+
+    Parameters
+    ----------
+    src, rec, depth, res, freqtime, signal, ab, aniso, epermH, epermV,
+    mpermH, mpermV, **kwargs :
+        Same as :func:`dipole`.
+    v : array_like
+        Data-space vector.  Its shape must match the (squeezed) data layout of
+        the Jacobian returned by :func:`dipole` — i.e. ``(nfreqtime, nrec)``
+        for a single source, or ``(nfreqtime, nrec, nsrc)`` for multiple.
+    jac : {str, list of str}, default: 'res'
+        Parameter(s) w.r.t. which the adjoint is taken.  See :func:`dipole`.
+
+    Returns
+    -------
+    Jtv : ndarray or dict
+        ``J^H v`` of shape ``(n_param,)`` per parameter.  A bare ndarray for a
+        single (string) ``jac``, or a ``dict {param: ndarray}`` for a list.
+
+    Notes
+    -----
+    This is a *correct* adjoint: it passes the adjoint test to machine
+    precision because it forms the forward-mode Jacobian (via :func:`dipole`)
+    and contracts with ``v``.  It therefore costs the same as the forward
+    Jacobian (``O(n_param)``), and does **not** yet realise the ``O(n_data)``
+    cost of a true reverse-mode (backpropagation) adjoint through the
+    reflection recursion.  For 1D layered media (few layers) this is typically
+    not a bottleneck; the reverse-mode kernel is left as future work.
+    """
+    _, J = dipole(
+        src, rec, depth, res, freqtime, signal=signal, ab=ab, aniso=aniso,
+        epermH=epermH, epermV=epermV, mpermH=mpermH, mpermV=mpermV,
+        jac=jac, **kwargs)
+
+    if isinstance(J, dict):
+        return {p: _contract_adjoint(Jp, v) for p, Jp in J.items()}
+    return _contract_adjoint(J, v)
+
 
 def analytical(src, rec, res, freqtime, solution='fs', signal=None, ab=11,
                aniso=None, epermH=None, epermV=None, mpermH=None, mpermV=None,

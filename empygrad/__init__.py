@@ -21,7 +21,7 @@ from empygrad import kernel
 from empygrad import scripts
 
 # Import most important functions
-from empygrad.model import bipole, dipole, ip_and_q
+from empygrad.model import bipole, dipole, ip_and_q, adjoint_jacobian
 from empygrad.utils import EMArray, set_minimum, get_minimum, Report
 
 # For top-namespace
@@ -29,8 +29,8 @@ from empygrad.scripts import fdesign, tmtemod
 from empygrad.model import analytical, gpr, dipole_k, fem, tem
 
 __all__ = ['model', 'utils', 'kernel', 'scripts',
-           'bipole', 'dipole', 'ip_and_q', 'EMArray', 'set_minimum',
-           'get_minimum', 'Report']
+           'bipole', 'dipole', 'adjoint_jacobian', 'ip_and_q', 'EMArray',
+           'set_minimum', 'get_minimum', 'Report']
 
 # Version defined in utils, so we can easier use it within the package itself.
 __version__ = utils.__version__
