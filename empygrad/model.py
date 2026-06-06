@@ -793,6 +793,11 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 # Parameters whose Jacobian flows through d(etaH, etaV)/d(param) seeds.
 _ETA_TYPE_PARAMS = frozenset({'res', 'aniso', 'epermH', 'epermV'})
 
+# Parameters whose Jacobian flows through d(zetaH, zetaV)/d(param) seeds
+# (magnetic permeability).  These do NOT flow through etaH/etaV; they enter the
+# Gamma formulas, the TE reflection seed, and the TE ab-factor scaling.
+_ZETA_TYPE_PARAMS = frozenset({'mpermH', 'mpermV'})
+
 # Parameters whose Jacobian flows through depth/thickness perturbations.
 _GEO_DEPTH_PARAMS = frozenset({'depth', 'thickness'})
 _GEO_TYPE_PARAMS  = _GEO_DEPTH_PARAMS  # legacy alias
@@ -809,8 +814,8 @@ _REC_POS_PARAMS = frozenset({'rec_z'})
 # does not flow through the kernel Jacobian machinery at all.
 _OFFSET_PARAMS = frozenset({'off'})
 
-_ALL_JAC_PARAMS = (_ETA_TYPE_PARAMS | _GEO_TYPE_PARAMS | _SRC_POS_PARAMS
-                   | _REC_POS_PARAMS | _OFFSET_PARAMS)
+_ALL_JAC_PARAMS = (_ETA_TYPE_PARAMS | _ZETA_TYPE_PARAMS | _GEO_TYPE_PARAMS
+                   | _SRC_POS_PARAMS | _REC_POS_PARAMS | _OFFSET_PARAMS)
 
 
 def _parse_jac(jac):
@@ -941,6 +946,64 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso, freq):
     jac_etaH = np.concatenate(seeds_H, axis=2)
     jac_etaV = np.concatenate(seeds_V, axis=2)
     return jac_etaH, jac_etaV, param_slices
+
+
+def _stacked_zeta_seeds(zeta_params, etaH, freq):
+    """Compute stacked d(zetaH, zetaV)/d(param) seed matrices (magnetic perm.).
+
+    zetaH = i*omega*mu0*mpermH  =>  d(zetaH[i,n])/d(mpermH[n]) = s[i]*mu0
+    zetaV = i*omega*mu0*mpermV  =>  d(zetaV[i,n])/d(mpermV[n]) = s[i]*mu0
+
+    Parameters
+    ----------
+    zeta_params : list of str
+        Ordered subset of ``_ZETA_TYPE_PARAMS`` to include.
+    etaH : complex ndarray, shape (nfreq, nlayer)
+        Used only for nfreq, nlayer, dtype.
+    freq : 1-D float array, length nfreq
+        Frequencies (Hz).
+
+    Returns
+    -------
+    jac_zetaH, jac_zetaV : complex ndarray, shape (nfreq, nlayer, n_total)
+        Stacked seed matrices (``n_total = nlayer * len(zeta_params)``).
+    param_slices : dict
+        Maps each parameter name to its ``slice`` in the last axis.
+    """
+    _MU0 = 4e-7 * np.pi    # vacuum permeability (H/m)
+    nfreq, nlayer = etaH.shape
+    idx = np.arange(nlayer)
+
+    seeds_zH, seeds_zV, param_slices = [], [], {}
+    col = 0
+
+    for p in zeta_params:
+        j_zH = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
+        j_zV = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
+
+        if p == 'mpermH':
+            for i_f in range(nfreq):
+                sval = 2j * np.pi * freq[i_f]
+                j_zH[i_f, idx, idx] = sval * _MU0
+            # j_zV stays zero
+        elif p == 'mpermV':
+            for i_f in range(nfreq):
+                sval = 2j * np.pi * freq[i_f]
+                j_zV[i_f, idx, idx] = sval * _MU0
+            # j_zH stays zero
+        else:
+            raise NotImplementedError(
+                f"Jacobian w.r.t. '{p}' is not yet implemented. "
+                f"Supported zeta-type parameters: {sorted(_ZETA_TYPE_PARAMS)}.")
+
+        seeds_zH.append(j_zH)
+        seeds_zV.append(j_zV)
+        param_slices[p] = slice(col, col + nlayer)
+        col += nlayer
+
+    jac_zetaH = np.concatenate(seeds_zH, axis=2)
+    jac_zetaV = np.concatenate(seeds_zV, axis=2)
+    return jac_zetaH, jac_zetaV, param_slices
 
 
 def _offset_derivative(PJ0, PJ1, PJ0b, lambd, off, filt, ang_fact, ab):
@@ -1198,6 +1261,10 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         - ``'aniso'`` : ``d(EM)/d(aniso_k)``, shape ``(nfreq, nrec, nlayer)``.
         - ``'epermH'`` : ``d(EM)/d(epermH_k)``, shape ``(nfreq, nrec, nlayer)``.
         - ``'epermV'`` : ``d(EM)/d(epermV_k)``, shape ``(nfreq, nrec, nlayer)``.
+        - ``'mpermH'`` : ``d(EM)/d(mpermH_k)``, shape ``(nfreq, nrec, nlayer)``.
+          Not supported in MM mode (magnetic source AND receiver).
+        - ``'mpermV'`` : ``d(EM)/d(mpermV_k)``, shape ``(nfreq, nrec, nlayer)``.
+          Not supported in MM mode (magnetic source AND receiver).
         - ``'depth'`` : ``d(EM)/d(depth[k])``, shape ``(nfreq, nrec, n_interfaces)``
           where ``n_interfaces = len(depth)``; requires ``signal=None``, ``ht='dlf'``.
         - ``'thickness'`` : not yet implemented.
@@ -1376,7 +1443,16 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     has_off   = 'off' in jac_params   # offset derivative — handled separately
 
     eta_params   = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
+    zeta_params  = [p for p in jac_params if p in _ZETA_TYPE_PARAMS]
     depth_params = [p for p in jac_params if p in _GEO_DEPTH_PARAMS]
+
+    # Magnetic-permeability Jacobians: MM mode (both src and rec magnetic) is
+    # not supported — the eta<->zeta duality swap makes the seed bookkeeping
+    # intricate, and the only MM ab's use the trivial ab-factor block.
+    if zeta_params and msrc and mrec:
+        raise NotImplementedError(
+            f"Jacobian w.r.t. {zeta_params} is not implemented for MM mode "
+            "(magnetic source AND magnetic receiver).")
 
     # The Jacobian always uses DLF for the Hankel transform regardless of the
     # ht setting for the primal.  Reason: kernel.wavenumber() returns PJ arrays
@@ -1399,87 +1475,92 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         htarg_jac['dlf'], off, htarg_jac['pts_per_dec'])
     # int_pts is always None here (pts_per_dec=0)
 
-    # --- Build eta seeds ---
+    # --- Build the unified kernel seed arrays, column block by column block ---
+    # Five seed streams are aligned on a single parameter (column) axis:
+    #   jac_etaH_in/jac_etaV_in  (nfreq, nlayer, n_params)
+    #   jac_zetaH_in/jac_zetaV_in (nfreq, nlayer, n_params)  [magnetic perm.]
+    #   jac_dlo_in               (n_interfaces, n_params)    [depth]
+    # plus per-column src_z/rec_z indicators (handled after).
+    nlayer       = etaH.shape[1]
+    n_interfaces = depth.size - 1   # depth[0] = -inf; free interfaces are depth[1:]
+
+    bl_eH, bl_eV, bl_zH, bl_zV, bl_dlo = [], [], [], [], []
+    all_slices = {}
+    col = 0
+
+    def _zero_eta(n):
+        return np.zeros((freq.size, nlayer, n), dtype=etaH.dtype)
+
+    def _add_block(jeH, jeV, jzH, jzV, jdlo, sl):
+        """Append one parameter group's seed blocks and offset its slices."""
+        nonlocal col
+        n = jeH.shape[2]
+        bl_eH.append(jeH);  bl_eV.append(jeV)
+        bl_zH.append(jzH);  bl_zV.append(jzV)
+        bl_dlo.append(jdlo)
+        for name, s in sl.items():
+            all_slices[name] = slice(col + s.start, col + s.stop)
+        col += n
+
+    # eta group (res / aniso / epermH / epermV)
     if eta_params:
-        jac_etaH_eta, jac_etaV_eta, eta_slices = _stacked_eta_seeds(
-            eta_params, etaH, res, aniso, freq)
-        n_eta = jac_etaH_eta.shape[2]
-    else:
-        n_eta = 0
-        eta_slices = {}
-        jac_etaH_eta = np.zeros((freq.size, etaH.shape[1], 0), dtype=etaH.dtype)
-        jac_etaV_eta = np.zeros_like(jac_etaH_eta)
+        jeH, jeV, sl = _stacked_eta_seeds(eta_params, etaH, res, aniso, freq)
+        n = jeH.shape[2]
+        _add_block(jeH, jeV, _zero_eta(n), _zero_eta(n),
+                   np.zeros((n_interfaces, n)), sl)
 
-    # --- Build depth seeds ---
-    # depth[0] = -inf (added by check_model); free interfaces are depth[1:]
-    n_interfaces = depth.size - 1   # = nlayer - 1
+    # zeta group (mpermH / mpermV) — seeds flow through zetaH/zetaV only
+    if zeta_params:
+        jzH, jzV, sl = _stacked_zeta_seeds(zeta_params, etaH, freq)
+        n = jzH.shape[2]
+        _add_block(_zero_eta(n), _zero_eta(n), jzH, jzV,
+                   np.zeros((n_interfaces, n)), sl)
+
+    # depth group
     if depth_params:
-        jac_depth_lower, depth_slices = _stacked_depth_seeds(
-            depth_params, n_interfaces)
-        n_depth = jac_depth_lower.shape[1]
-    else:
-        n_depth = 0
-        depth_slices = {}
-        jac_depth_lower = np.zeros((n_interfaces, 0))
+        jdlo, sl = _stacked_depth_seeds(depth_params, n_interfaces)
+        n = jdlo.shape[1]
+        _add_block(_zero_eta(n), _zero_eta(n), _zero_eta(n), _zero_eta(n),
+                   jdlo, sl)
 
-    n_params = n_eta + n_depth
-
-    # --- Combine into unified (nfreq, nlayer, n_params) arrays ---
-    if n_eta > 0 and n_depth > 0:
-        zeros_depth_eta = np.zeros((freq.size, etaH.shape[1], n_depth),
-                                   dtype=etaH.dtype)
-        jac_etaH_in = np.concatenate([jac_etaH_eta, zeros_depth_eta], axis=2)
-        jac_etaV_in = np.concatenate([jac_etaV_eta, zeros_depth_eta], axis=2)
-        zeros_eta_depth = np.zeros((n_interfaces, n_eta))
-        jac_dlo_in = np.concatenate([zeros_eta_depth, jac_depth_lower], axis=1)
-        all_slices = dict(eta_slices)
-        for name, sl in depth_slices.items():
-            all_slices[name] = slice(sl.start + n_eta, sl.stop + n_eta)
-    elif n_eta > 0:
-        jac_etaH_in = jac_etaH_eta
-        jac_etaV_in = jac_etaV_eta
-        jac_dlo_in  = np.zeros((n_interfaces, n_eta))
-        all_slices  = eta_slices
-    else:  # depth only (or no params yet)
-        jac_etaH_in = np.zeros((freq.size, etaH.shape[1], n_depth),
-                               dtype=etaH.dtype)
-        jac_etaV_in = np.zeros_like(jac_etaH_in)
-        jac_dlo_in  = jac_depth_lower
-        all_slices  = dict(depth_slices)
-
-    # --- Augment with src_z column (zero eta/depth seeds, special jac_dists) ---
+    # src_z column (zero eta/zeta/depth seeds; carried via indicator)
     if has_src_z:
         if mrec and not msrc:
             raise NotImplementedError(
                 "Jacobian w.r.t. 'src_z' is not yet implemented for ME mode "
                 "(mrec=True, msrc=False).  Use ab values with electric receivers.")
-        src_z_col_idx = n_params   # appended after eta+depth cols
-        zeros_sz = np.zeros((freq.size, etaH.shape[1], 1), dtype=etaH.dtype)
-        jac_etaH_in = np.concatenate([jac_etaH_in, zeros_sz], axis=2)
-        jac_etaV_in = np.concatenate([jac_etaV_in, zeros_sz], axis=2)
-        jac_dlo_in  = np.concatenate([jac_dlo_in,
-                                      np.zeros((n_interfaces, 1))], axis=1)
-        all_slices['src_z'] = slice(src_z_col_idx, src_z_col_idx + 1)
-        n_params += 1
+        src_z_col_idx = col
+        _add_block(_zero_eta(1), _zero_eta(1), _zero_eta(1), _zero_eta(1),
+                   np.zeros((n_interfaces, 1)), {'src_z': slice(0, 1)})
     else:
         src_z_col_idx = -1
 
-    # --- Augment with rec_z column ---
+    # rec_z column
     if has_rec_z:
         if mrec and not msrc:
             raise NotImplementedError(
                 "Jacobian w.r.t. 'rec_z' is not yet implemented for ME mode "
                 "(mrec=True, msrc=False).  Use ab values with electric receivers.")
-        rec_z_col_idx = n_params
-        zeros_rz = np.zeros((freq.size, etaH.shape[1], 1), dtype=etaH.dtype)
-        jac_etaH_in = np.concatenate([jac_etaH_in, zeros_rz], axis=2)
-        jac_etaV_in = np.concatenate([jac_etaV_in, zeros_rz], axis=2)
-        jac_dlo_in  = np.concatenate([jac_dlo_in,
-                                      np.zeros((n_interfaces, 1))], axis=1)
-        all_slices['rec_z'] = slice(rec_z_col_idx, rec_z_col_idx + 1)
-        n_params += 1
+        rec_z_col_idx = col
+        _add_block(_zero_eta(1), _zero_eta(1), _zero_eta(1), _zero_eta(1),
+                   np.zeros((n_interfaces, 1)), {'rec_z': slice(0, 1)})
     else:
         rec_z_col_idx = -1
+
+    n_params = col
+
+    if n_params > 0:
+        jac_etaH_in  = np.concatenate(bl_eH,  axis=2)
+        jac_etaV_in  = np.concatenate(bl_eV,  axis=2)
+        jac_zetaH_in = np.concatenate(bl_zH,  axis=2)
+        jac_zetaV_in = np.concatenate(bl_zV,  axis=2)
+        jac_dlo_in   = np.concatenate(bl_dlo, axis=1)
+    else:  # off-only (or no kernel params)
+        jac_etaH_in  = _zero_eta(0)
+        jac_etaV_in  = _zero_eta(0)
+        jac_zetaH_in = _zero_eta(0)
+        jac_zetaV_in = _zero_eta(0)
+        jac_dlo_in   = np.zeros((n_interfaces, 0))
 
     # Indicator vectors: 1.0 at the relevant column, 0.0 elsewhere
     jac_src_z_indicator = np.zeros(n_params)
@@ -1493,13 +1574,13 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     _dlf_kw = dict(dlf=htarg_jac['dlf'], pts_per_dec=0,
                    ang_fact=ang_fact, ab=ab_calc, int_pts=None)
 
-    def _run_wavenumber(eH, eV, zH, zV, lmbd, jH, jV):
+    def _run_wavenumber(eH, eV, zH, zV, lmbd, jH, jV, jzH, jzV):
         """Single kernel.wavenumber call; returns (jPJ0, jPJ1, jPJ0b)."""
         _, _, _, jPJ0, jPJ1, jPJ0b = kernel.wavenumber(
             zsrc, zrec, lsrc, lrec, depth, eH, eV, zH, zV,
             lmbd, ab_calc, xdirect, msrc, mrec, jH, jV,
             jac_dlo_in, jac_src_z_indicator, src_z_col_idx,
-            jac_rec_z_indicator, rec_z_col_idx)
+            jac_rec_z_indicator, rec_z_col_idx, jzH, jzV)
         return jPJ0, jPJ1, jPJ0b
 
     def _dlf_cols(jPJ0, jPJ1, jPJ0b, lmbd, off_arr, af, dest):
@@ -1521,7 +1602,8 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         if not (loop_freq or loop_off):
             # --- Default: single vectorised pass over all freqs and offsets ---
             jPJ0, jPJ1, jPJ0b = _run_wavenumber(
-                etaH, etaV, zetaH, zetaV, lambd, jac_etaH_in, jac_etaV_in)
+                etaH, etaV, zetaH, zetaV, lambd, jac_etaH_in, jac_etaV_in,
+                jac_zetaH_in, jac_zetaV_in)
             _dlf_cols(jPJ0, jPJ1, jPJ0b, lambd, off, ang_fact, jac_EM)
 
         elif loop_freq:
@@ -1531,7 +1613,8 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
                     etaH [None, i_f, :], etaV [None, i_f, :],
                     zetaH[None, i_f, :], zetaV[None, i_f, :],
                     lambd,
-                    jac_etaH_in[None, i_f, :, :], jac_etaV_in[None, i_f, :, :])
+                    jac_etaH_in[None, i_f, :, :], jac_etaV_in[None, i_f, :, :],
+                    jac_zetaH_in[None, i_f, :, :], jac_zetaV_in[None, i_f, :, :])
                 _dlf_cols(jPJ0_f, jPJ1_f, jPJ0b_f, lambd, off, ang_fact,
                           jac_EM[i_f:i_f+1, :, :])
 
@@ -1543,7 +1626,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
                 jPJ0_ii, jPJ1_ii, jPJ0b_ii = _run_wavenumber(
                     etaH, etaV, zetaH, zetaV,
                     lmbd_ii,
-                    jac_etaH_in, jac_etaV_in)
+                    jac_etaH_in, jac_etaV_in, jac_zetaH_in, jac_zetaV_in)
                 _dlf_cols(jPJ0_ii, jPJ1_ii, jPJ0b_ii,
                           lmbd_ii, off[ii:ii+1], af_ii,
                           jac_EM[:, ii:ii+1, :])

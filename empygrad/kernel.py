@@ -59,7 +59,8 @@ _NB_PAR = {'nogil': True, 'cache': True, 'parallel': True}
 def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                    lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None,
                    jac_depth_lower=None, jac_src_z_indicator=None, src_z_col=-1,
-                   jac_rec_z_indicator=None, rec_z_col=-1):
+                   jac_rec_z_indicator=None, rec_z_col=-1,
+                   jac_zetaH=None, jac_zetaV=None):
     r"""Wavenumber-domain solution and optionally its Jacobian w.r.t. horizontal resistivity.
 
     Calls :func:`greenfct` to obtain the primal Green's functions
@@ -102,7 +103,8 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     _gfct = greenfct(
         zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower,
-        jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col)
+        jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col,
+        jac_zetaH, jac_zetaV)
     if jac_mode:
         PTM, PTE, jac_PTM, jac_PTE = _gfct
     else:
@@ -291,7 +293,8 @@ def _wavenumber_jac_collect(jac_PTM, jac_PTE, lambd, ab, sign,
 def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
              lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None,
              jac_depth_lower=None, jac_src_z_indicator=None, src_z_col=-1,
-             jac_rec_z_indicator=None, rec_z_col=-1):
+             jac_rec_z_indicator=None, rec_z_col=-1,
+             jac_zetaH=None, jac_zetaV=None):
     r"""Green's function and optionally its Jacobian w.r.t. horizontal resistivity.
 
     Propagates the resistivity Jacobians ``jac_etaH`` and ``jac_etaV``
@@ -337,22 +340,31 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         jac_src_z_indicator = np.zeros(nlayer_res)
     if jac_rec_z_indicator is None:
         jac_rec_z_indicator = np.zeros(nlayer_res)
+    if jac_zetaH is None:
+        jac_zetaH = np.zeros((nfreq, nlayer, nlayer_res), dtype=etaH.dtype)
+    if jac_zetaV is None:
+        jac_zetaV = np.zeros((nfreq, nlayer, nlayer_res), dtype=etaH.dtype)
     return _greenfct_jac(
         zsrc, zrec, int(lsrc), int(lrec), depth, etaH, etaV, zetaH, zetaV,
         lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower,
-        jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col)
+        jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col,
+        jac_zetaH, jac_zetaV)
 
 @nb.njit(**_NB_PAR)
 def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
-                     jac_etaH, jac_etaV):
+                     jac_etaH, jac_etaV, jac_zetaH):
     """Fill jac_Gam in-place for the TM non-MM case (explicit scalar loops).
 
     Implements d(Gam_TM)/d(p) = d(Gam_TM^2)/d(p) / (2*Gam_TM)  using:
-      d(Gam^2)/d(etaH) = kappa^2/etaV + zetaH    d13(2.4) / jac(2a)
-      d(Gam^2)/d(etaV) = -etaH * kappa^2/etaV^2  d13(2.8) / jac(2b)
+      d(Gam^2)/d(etaH)  = kappa^2/etaV + zetaH   d13(2.4) / jac(2a)
+      d(Gam^2)/d(etaV)  = -etaH * kappa^2/etaV^2 d13(2.8) / jac(2b)
+      d(Gam^2)/d(zetaH) = etaH                   d13(2.10) / jac(2c)  [mperm]
 
     Also used for TE-MM: Gam_TE_MM^2 = (etaH/etaV)*kappa^2 + zetaH*etaH
     is algebraically identical to the TM formula with pre-swap values.
+
+    ``jac_zetaH`` is non-zero only for magnetic-permeability parameters
+    (``mpermH``); it is all-zeros for eta-type parameters (res/aniso/eperm).
 
     Avoids allocating intermediate 5D broadcast arrays.
     jac_Gam shape: (nfreq, noff, nlayer, nlambda, nlayer_res)
@@ -369,33 +381,48 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
                     lamsq  = lambd[ii, iv] * lambd[ii, iv]
                     two_G  = 2.0 * Gam[i, ii, iii, iv]
                     for k in range(nlayer_res):
-                        jH = jac_etaH[i, iii, k]
-                        jV = jac_etaV[i, iii, k]
+                        jH  = jac_etaH[i, iii, k]
+                        jV  = jac_etaV[i, iii, k]
+                        jzH = jac_zetaH[i, iii, k]
                         jac_Gam[i, ii, iii, iv, k] = (
                             (jH / eV_val - eH_val * jV / eV_sq) * lamsq
-                            + zH_val * jH
+                            + zH_val * jH + eH_val * jzH
                         ) / two_G
 
 
 @nb.njit(**_NB_PAR)
-def _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH):
+def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, etaH, zetaH, zetaV,
+                     jac_etaH, jac_zetaH, jac_zetaV):
     """Fill jac_Gam in-place for the TE non-MM and TM-MM cases.
 
-    Both share: d(Gam_TE^2)/d(etaH) = zetaH  d13(2.16) / jac(3c)
-    (d_zetaH = 0 for non-magnetic earth; the zetaH/zetaV anisotropy term
-    vanishes and only the bulk term zetaH*etaH contributes).
-    TE-MM uses _fill_jac_Gam_TM with pre-swap values instead.
+    Gam_TE^2 = (zetaH/zetaV)*kappa^2 + zetaH*etaH, with derivatives:
+      d(Gam_TE^2)/d(etaH)  = zetaH                       d13(2.16) / jac(3c)
+      d(Gam_TE^2)/d(zetaH) = kappa^2/zetaV + etaH        [mpermH]
+      d(Gam_TE^2)/d(zetaV) = -zetaH*kappa^2/zetaV^2      [mpermV]
+
+    ``jac_zetaH`` / ``jac_zetaV`` are non-zero only for magnetic-permeability
+    parameters; for eta-type parameters they are all-zeros, recovering the
+    original behaviour (only the ``zetaH * jac_etaH`` term survives).
     """
     nfreq, noff, nlayer, nlambda, nlayer_res = jac_Gam.shape
     for i in nb.prange(nfreq):
         for iii in range(nlayer):
             zH_val = zetaH[i, iii]
+            zV_val = zetaV[i, iii]
+            zV_sq  = zV_val * zV_val
+            eH_val = etaH[i, iii]
             for ii in range(noff):
                 for iv in range(nlambda):
+                    lamsq = lambd[ii, iv] * lambd[ii, iv]
                     two_G = 2.0 * Gam[i, ii, iii, iv]
                     for k in range(nlayer_res):
+                        jH  = jac_etaH[i, iii, k]
+                        jzH = jac_zetaH[i, iii, k]
+                        jzV = jac_zetaV[i, iii, k]
                         jac_Gam[i, ii, iii, iv, k] = (
-                            zH_val * jac_etaH[i, iii, k]
+                            zH_val * jH
+                            + (lamsq / zV_val + eH_val) * jzH
+                            - zH_val * lamsq / zV_sq * jzV
                         ) / two_G
 
 
@@ -404,7 +431,7 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH):
 def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                   lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV,
                   jac_depth_lower, jac_src_z_indicator, src_z_col,
-                  jac_rec_z_indicator, rec_z_col):
+                  jac_rec_z_indicator, rec_z_col, jac_zetaH, jac_zetaV):
     """JIT-compiled Green's function with Jacobian.
 
     Mirrors ``_greenfct_numpy`` with explicit scalar loops instead of
@@ -432,14 +459,19 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     zsrc_a = zsrc;  zrec_a = zrec
     etaH_a  = etaH;  etaV_a  = etaV
     zetaH_a = zetaH; zetaV_a = zetaV
-    jac_etaH_a = jac_etaH
-    jac_etaV_a = jac_etaV
+    jac_etaH_a  = jac_etaH
+    jac_etaV_a  = jac_etaV
+    jac_zetaH_a = jac_zetaH   # active zeta seeds (non-MM: == originals)
+    jac_zetaV_a = jac_zetaV
     if mrec:
         if msrc:
             etaH_a  = -zetaH;  etaV_a  = -zetaV
             zetaH_a = -etaH;   zetaV_a = -etaV
             jac_etaH_a = np.zeros((nfreq, nlayer, nlayer_res), dtype=dtype)
             jac_etaV_a = np.zeros_like(jac_etaH_a)
+            # MM-mode magnetic-permeability Jacobians are guarded in model.py,
+            # so jac_zetaH/jac_zetaV are all-zeros here; the trivial else
+            # ab-block (used by all MM ab's) never reads jac_zetaH_a anyway.
         else:
             zsrc_a = zrec;  zrec_a = zsrc
             lsrc_a = lrec;  lrec_a = lsrc
@@ -517,7 +549,9 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                 # TE-MM: e_zH = zetaH_a = -etaH, so d(e_zH)/d(res) = -jac_etaH
                 jac_e_zH_l = -jac_etaH
             else:
-                jac_e_zH_l = np.zeros((nfreq, nlayer, nlayer_res), dtype=dtype)
+                # TE non-MM: e_zH = zetaH, so d(e_zH)/d(p) = jac_zetaH.
+                # Zero for eta-type params; non-zero for mpermH.
+                jac_e_zH_l = jac_zetaH
 
         Gam     = gamTM if TM else gamTE
         jac_Gam = jac_gamTM if TM else jac_gamTE
@@ -535,19 +569,21 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                     for iv in range(nlambda):
                         Gam[i, ii, iii, iv] = np.sqrt(hdv * lambd[ii, iv] ** 2 + hth)
 
-        # jac_Gam via JIT helpers (avoids large 5-D temporaries)
+        # jac_Gam via JIT helpers (avoids large 5-D temporaries).
+        # All calls use pre-swap (original) etaH/etaV/zetaH/zetaV and seeds —
+        # the TM/TE-MM formulas are algebraically identical in those variables.
         if TM and not (mrec and msrc):
-            # TM non-MM: standard TM formula
+            # TM non-MM
             _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
-                             etaH, etaV, zetaH, jac_etaH, jac_etaV)
+                             etaH, etaV, zetaH, jac_etaH, jac_etaV, jac_zetaH)
         elif not TM and (mrec and msrc):
-            # TE-MM: Gam_TE_MM^2 = (etaH/etaV)*kappa^2 + zetaH*etaH (pre-swap values)
-            # identical in form to TM — use the TM fill with pre-swap etaH/etaV/zetaH
+            # TE-MM: identical in form to TM with pre-swap values
             _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
-                             etaH, etaV, zetaH, jac_etaH, jac_etaV)
+                             etaH, etaV, zetaH, jac_etaH, jac_etaV, jac_zetaH)
         else:
-            # TE non-MM and TM-MM: d(Gam^2)/d(res) = zetaH * jac_etaH
-            _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH)
+            # TE non-MM and TM-MM
+            _fill_jac_Gam_TE(jac_Gam, Gam, lambd,
+                             etaH, zetaH, zetaV, jac_etaH, jac_zetaH, jac_zetaV)
 
         # Wu / Wd and their Jacobians
         Wu     = np.zeros((nfreq, noff, nlambda), dtype=dtype)
@@ -775,9 +811,12 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                         jgTM_lr_k = jac_gamTM[i, ii, lrec_a, iv, k]
                         jeH_lr_k  = jac_etaH_a[i, lrec_a, k]
                         jgTE_ls_k = jac_gamTE[i, ii, lsrc_a, iv, k]
+                        jzH_ls_k  = jac_zetaH_a[i, lsrc_a, k]
                         jfTM_k = ((jgTM_lr_k * eH_lr - gTM_lr * jeH_lr_k)
                                   / (eH_lr * eH_lr))
-                        jfTE_k = -zH_ls * jgTE_ls_k / (gTE_ls * gTE_ls)
+                        # fTE = zH_ls/gTE_ls; jzH_ls != 0 only for mpermH
+                        jfTE_k = ((jzH_ls_k * gTE_ls - zH_ls * jgTE_ls_k)
+                                  / (gTE_ls * gTE_ls))
                         jac_GTM[i, ii, iv, k] = (jac_GTM_pre[i, ii, iv, k] * fTM
                                                   + GTM_pre[i, ii, iv] * jfTM_k)
                         jac_GTE[i, ii, iv, k] = (jac_GTE_pre[i, ii, iv, k] * fTE
@@ -881,7 +920,8 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         for i in nb.prange(nfreq):
             zH_ls = zetaH_a[i, lsrc_a]
             zV_ls = zetaV_a[i, lsrc_a]
-            f     = zH_ls / zV_ls   # d_zetaH = d_zetaV = 0
+            zV_sq = zV_ls * zV_ls
+            f     = zH_ls / zV_ls   # depends on mpermH/mpermV (else d=0)
             for ii in range(noff):
                 for iv in range(nlambda):
                     gTE_ls = gamTE[i, ii, lsrc_a, iv]
@@ -890,7 +930,11 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                     # GTM remains zero
                     for k in range(nlayer_res):
                         jgTE_ls_k = jac_gamTE[i, ii, lsrc_a, iv, k]
-                        jfTE_k = -f * jgTE_ls_k / (gTE_ls * gTE_ls)
+                        jzH_ls_k  = jac_zetaH_a[i, lsrc_a, k]
+                        jzV_ls_k  = jac_zetaV_a[i, lsrc_a, k]
+                        jf_k = ((jzH_ls_k * zV_ls - zH_ls * jzV_ls_k) / zV_sq)
+                        jfTE_k = ((jf_k * gTE_ls - f * jgTE_ls_k)
+                                  / (gTE_ls * gTE_ls))
                         jac_GTE[i, ii, iv, k] = (jac_GTE_pre[i, ii, iv, k] * fTE
                                                   + GTE_pre[i, ii, iv] * jfTE_k)
 
@@ -937,9 +981,10 @@ def _greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                     lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV):
     """Pure-numpy Green's function with Jacobian (no jac_mode branching).
 
-    Readable reference implementation. Always returns (GTM, GTE, jac_GTM, jac_GTE).
-    The public dispatcher ``greenfct`` routes here when jac args are provided,
-    and to ``_empymod_kernel.greenfct`` otherwise.
+    Readable reference implementation (not in the production path — ``greenfct``
+    dispatches to the JIT ``_greenfct_jac``).  Supports eta-type Jacobians only;
+    magnetic-permeability seeds (``jac_zetaH``/``jac_zetaV``) are taken as zero
+    here.  Always returns (GTM, GTE, jac_GTM, jac_GTE).
     """
     nfreq, nlayer = etaH.shape
     noff, nlambda = lambd.shape
@@ -947,10 +992,13 @@ def _greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
 
     # Save pre-swap values — needed for jac_Gam after the MM reciprocity swap.
     zetaH_fg     = zetaH
+    zetaV_fg     = zetaV
     etaH_fg      = etaH
     etaV_fg      = etaV
     jac_etaH_fg  = jac_etaH
     jac_etaV_fg  = jac_etaV
+    # Magnetic-permeability seeds are zero in this eta-only reference.
+    jac_zeta_zero = np.zeros((nfreq, nlayer, nlayer_res), dtype=etaH.dtype)
 
     # Reciprocity switches for magnetic receivers
     if mrec:
@@ -1005,15 +1053,17 @@ def _greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
             # TM non-MM: standard TM formula
             _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
                               etaH_fg, etaV_fg, zetaH_fg,
-                              jac_etaH_fg, jac_etaV_fg)
+                              jac_etaH_fg, jac_etaV_fg, jac_zeta_zero)
         elif not TM and (mrec and msrc):
             # TE-MM: Gam_TE_MM^2 = (etaH/etaV)*kappa^2 + zetaH*etaH (pre-swap values)
             _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
                               etaH_fg, etaV_fg, zetaH_fg,
-                              jac_etaH_fg, jac_etaV_fg)
+                              jac_etaH_fg, jac_etaV_fg, jac_zeta_zero)
         else:
-            # TE non-MM and TM-MM: d(Gam^2)/d(res) = zetaH * jac_etaH
-            _fill_jac_Gam_TE(jac_Gam, Gam, zetaH_fg, jac_etaH_fg)
+            # TE non-MM and TM-MM
+            _fill_jac_Gam_TE(jac_Gam, Gam, lambd,
+                              etaH_fg, zetaH_fg, zetaV_fg,
+                              jac_etaH_fg, jac_zeta_zero, jac_zeta_zero)
 
         lrecGam     = Gam[:, :, lrec, :]
         jac_lrecGam = jac_Gam[:, :, lrec, :, :]
