@@ -319,7 +319,70 @@ def test_jac_dict_res_and_aniso(model_aniso):
 
 
 # ---------------------------------------------------------------------------
-# 6. NotImplementedError guards
+# 6. MM mode (ab=66) with anisotropy — regression for TE-MM Jacobian bugs
+# ---------------------------------------------------------------------------
+# Two distinct bugs existed in the TE branch of the MM (msrc=mrec=True) path:
+#   Bug 1: jac_e_zH was zeroed instead of -jac_etaH  (visible for any aniso).
+#   Bug 2: _fill_jac_Gam_TE was used instead of _fill_jac_Gam_TM  (only
+#          visible when aniso != 1, because both formulas coincide for etaH==etaV).
+# The model3 fixture (isotropic) catches Bug 1. This fixture catches both.
+
+@pytest.fixture
+def model_ab66_aniso():
+    """3-layer model for VMD/Hz (ab=66, MM mode) with non-trivial anisotropy.
+
+    aniso[1]=2.0 makes etaH[1] != etaV[1], exposing the TE-MM jac_Gam formula
+    bug that is invisible for isotropic media.
+    """
+    return dict(
+        src=[0, 0, 0.001],
+        rec=[[2000., 4000.], [0., 0.], 0.001],
+        depth=[0, 1000.],
+        res=np.array([2e14, 50., 200.]),
+        aniso=np.array([1.0, 2.0, 1.5]),
+        freqtime=[1.0, 10.0],
+        epermH=[0, 1, 1],
+        ab=66,
+    )
+
+
+@pytest.mark.parametrize("k", [1, 2])
+def test_jac_res_vs_fd_ab66_aniso(model_ab66_aniso, k):
+    """res Jacobian for ab=66 with aniso != 1 must match central FD.
+
+    k=0 (air) is skipped: field is insensitive to air resistivity at these
+    frequencies, so both analytic and FD values are at the noise floor.
+    k=1, 2: exercises the TE-MM jac_Gam formula (Bug 2) which only differs
+    from the TE non-MM formula when aniso != 1.
+    """
+    m = model_ab66_aniso
+    h = 1e-4
+
+    _, J = dipole(
+        src=m["src"], rec=m["rec"], depth=m["depth"], res=m["res"],
+        aniso=m["aniso"], freqtime=m["freqtime"], epermH=m["epermH"],
+        ab=m["ab"], verb=0, jac='res')
+
+    res_p = m["res"].copy(); res_p[k] *= (1.0 + h)
+    res_m = m["res"].copy(); res_m[k] *= (1.0 - h)
+
+    EM_p = empymod.dipole(
+        src=m["src"], rec=m["rec"], depth=m["depth"], res=res_p,
+        aniso=m["aniso"], freqtime=m["freqtime"], epermH=m["epermH"],
+        ab=m["ab"], verb=0)
+    EM_m = empymod.dipole(
+        src=m["src"], rec=m["rec"], depth=m["depth"], res=res_m,
+        aniso=m["aniso"], freqtime=m["freqtime"], epermH=m["epermH"],
+        ab=m["ab"], verb=0)
+
+    dEM_fd = (np.asarray(EM_p) - np.asarray(EM_m)) / (2.0 * h * m["res"][k])
+    norm = max(np.max(np.abs(dEM_fd)), 1e-30)
+    assert_allclose(J[:, :, k] / norm, dEM_fd / norm, atol=1e-4,
+                    err_msg=f"ab=66 aniso res Jacobian FD mismatch for layer k={k}")
+
+
+# ---------------------------------------------------------------------------
+# 8. NotImplementedError guards
 # ---------------------------------------------------------------------------
 
 def test_raises_for_time_domain(model):

@@ -358,10 +358,10 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
 
 @nb.njit(**_NB_PAR)
 def _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH):
-    """Fill jac_Gam in-place for the TE / TM-MM case (explicit scalar loops).
+    """Fill jac_Gam in-place for the TE non-MM and TM-MM cases.
 
-    TE: d(Gam^2)/d(p) = zetaH * jac_etaH  (zetaH/zetaV ratio, d_zetaH=0).
-    TM-MM: same formula with pre-swap values.
+    Both share: d(Gam^2)/d(p) = zetaH * jac_etaH  (d_zetaH = 0 for non-magnetic earth).
+    TE-MM uses _fill_jac_Gam_TM with pre-swap values instead.
     """
     nfreq, noff, nlayer, nlambda, nlayer_res = jac_Gam.shape
     for i in nb.prange(nfreq):
@@ -448,7 +448,11 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
             jac_e_zH_l = jac_etaH_a
         else:
             e_zH = zetaH_a;  e_zV = zetaV_a;  z_eH = etaH_a
-            jac_e_zH_l = np.zeros((nfreq, nlayer, nlayer_res), dtype=dtype)
+            if mrec and msrc:
+                # TE-MM: e_zH = zetaH_a = -etaH, so d(e_zH)/d(res) = -jac_etaH
+                jac_e_zH_l = -jac_etaH
+            else:
+                jac_e_zH_l = np.zeros((nfreq, nlayer, nlayer_res), dtype=dtype)
 
         Gam     = gamTM if TM else gamTE
         jac_Gam = jac_gamTM if TM else jac_gamTE
@@ -468,9 +472,16 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
 
         # jac_Gam via JIT helpers (avoids large 5-D temporaries)
         if TM and not (mrec and msrc):
+            # TM non-MM: standard TM formula
+            _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
+                             etaH, etaV, zetaH, jac_etaH, jac_etaV)
+        elif not TM and (mrec and msrc):
+            # TE-MM: Gam_TE_MM^2 = (etaH/etaV)*kappa^2 + zetaH*etaH (pre-swap values)
+            # identical in form to TM — use the TM fill with pre-swap etaH/etaV/zetaH
             _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
                              etaH, etaV, zetaH, jac_etaH, jac_etaV)
         else:
+            # TE non-MM and TM-MM: d(Gam^2)/d(res) = zetaH * jac_etaH
             _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH)
 
         # Wu / Wd and their Jacobians
@@ -884,7 +895,11 @@ def _greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
             jac_e_zH_loop     = jac_etaH
         else:
             e_zH, e_zV, z_eH  = zetaH, zetaV, etaH
-            jac_e_zH_loop     = np.zeros((nfreq, nlayer, nlayer_res), dtype=_dtype)
+            if mrec and msrc:
+                # TE-MM: e_zH = zetaH (post-swap = -etaH_fg), so d(e_zH)/d(res) = -jac_etaH_fg
+                jac_e_zH_loop = -jac_etaH_fg
+            else:
+                jac_e_zH_loop = np.zeros((nfreq, nlayer, nlayer_res), dtype=_dtype)
 
         # Primal Gam
         Gam = np.zeros((nfreq, noff, nlayer, nlambda), dtype=_dtype)
@@ -900,10 +915,17 @@ def _greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         # jac_Gam via JIT scalar-loop fill (avoids large 5D broadcast temporaries)
         jac_Gam = jac_gamTM if TM else jac_gamTE
         if TM and not (mrec and msrc):
+            # TM non-MM: standard TM formula
+            _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
+                              etaH_fg, etaV_fg, zetaH_fg,
+                              jac_etaH_fg, jac_etaV_fg)
+        elif not TM and (mrec and msrc):
+            # TE-MM: Gam_TE_MM^2 = (etaH/etaV)*kappa^2 + zetaH*etaH (pre-swap values)
             _fill_jac_Gam_TM(jac_Gam, Gam, lambd,
                               etaH_fg, etaV_fg, zetaH_fg,
                               jac_etaH_fg, jac_etaV_fg)
         else:
+            # TE non-MM and TM-MM: d(Gam^2)/d(res) = zetaH * jac_etaH
             _fill_jac_Gam_TE(jac_Gam, Gam, zetaH_fg, jac_etaH_fg)
 
         lrecGam     = Gam[:, :, lrec, :]
