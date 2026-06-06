@@ -58,7 +58,8 @@ _NB_PAR = {'nogil': True, 'cache': True, 'parallel': True}
 # Wavenumber-frequency domain kernel
 def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                    lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None,
-                   jac_depth_lower=None, jac_src_z_indicator=None, src_z_col=-1):
+                   jac_depth_lower=None, jac_src_z_indicator=None, src_z_col=-1,
+                   jac_rec_z_indicator=None, rec_z_col=-1):
     r"""Wavenumber-domain solution and optionally its Jacobian w.r.t. horizontal resistivity.
 
     Calls :func:`greenfct` to obtain the primal Green's functions
@@ -101,7 +102,7 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     _gfct = greenfct(
         zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower,
-        jac_src_z_indicator, src_z_col)
+        jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col)
     if jac_mode:
         PTM, PTE, jac_PTM, jac_PTE = _gfct
     else:
@@ -289,7 +290,8 @@ def _wavenumber_jac_collect(jac_PTM, jac_PTE, lambd, ab, sign,
 
 def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
              lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None,
-             jac_depth_lower=None, jac_src_z_indicator=None, src_z_col=-1):
+             jac_depth_lower=None, jac_src_z_indicator=None, src_z_col=-1,
+             jac_rec_z_indicator=None, rec_z_col=-1):
     r"""Green's function and optionally its Jacobian w.r.t. horizontal resistivity.
 
     Propagates the resistivity Jacobians ``jac_etaH`` and ``jac_etaV``
@@ -333,10 +335,12 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         jac_depth_lower = np.zeros((nlayer - 1, nlayer_res))
     if jac_src_z_indicator is None:
         jac_src_z_indicator = np.zeros(nlayer_res)
+    if jac_rec_z_indicator is None:
+        jac_rec_z_indicator = np.zeros(nlayer_res)
     return _greenfct_jac(
         zsrc, zrec, int(lsrc), int(lrec), depth, etaH, etaV, zetaH, zetaV,
         lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower,
-        jac_src_z_indicator, src_z_col)
+        jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col)
 
 @nb.njit(**_NB_PAR)
 def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
@@ -399,7 +403,8 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH):
 @nb.njit(**_NB_PAR)
 def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                   lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV,
-                  jac_depth_lower, jac_src_z_indicator, src_z_col):
+                  jac_depth_lower, jac_src_z_indicator, src_z_col,
+                  jac_rec_z_indicator, rec_z_col):
     """JIT-compiled Green's function with Jacobian.
 
     Mirrors ``_greenfct_numpy`` with explicit scalar loops instead of
@@ -409,11 +414,13 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     jac_depth_lower : float64 ndarray, shape (nlayer-1, nlayer_res)
         d(depth_user[n])/d(param_k).  Pass zeros for eta-only callers.
     jac_src_z_indicator : float64 ndarray, shape (nlayer_res,)
-        1.0 at the src_z parameter column, 0.0 elsewhere.
-        Adds d(dp)/d(zsrc)=-1 and d(dm)/d(zsrc)=+1 to jac_dists.
+        1.0 at src_z column; overlays d(dp)/d(z')=-1, d(dm)/d(z')=+1.
     src_z_col : int
-        Column index of the src_z parameter, or -1 if not present.
-        Used for the direct-field zsrc correction.
+        Column of src_z, or -1.  Used for direct-field correction.
+    jac_rec_z_indicator : float64 ndarray, shape (nlayer_res,)
+        1.0 at rec_z column; overlays d(ddu)/d(z_r)=-1, d(ddd)/d(z_r)=+1.
+    rec_z_col : int
+        Column of rec_z, or -1.  Used for direct-field correction.
     """
     nfreq, nlayer = etaH.shape
     noff, nlambda = lambd.shape
@@ -460,6 +467,11 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
             jac_ddu[k] = jac_depth_lower[lrec_a, k]
         if lrec_a > 0:
             jac_ddd[k] = -jac_depth_lower[lrec_a - 1, k]
+        # rec_z contribution: d(ddu)/d(zrec)=-1 (ddu=depth[lrec+1]-zrec)
+        #                     d(ddd)/d(zrec)=+1 (ddd=zrec-depth[lrec])
+        rz = jac_rec_z_indicator[k]
+        jac_ddu[k] -= rz
+        jac_ddd[k] += rz
 
     # --- Pre-allocate TM/TE outputs (filled in-place in the loop below) ---
     gamTM       = np.zeros((nfreq, noff, nlayer, nlambda), dtype=dtype)
@@ -661,11 +673,14 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                             for k in range(nlayer_res):
                                 pre_jg[i, ii, iv, k] += sfact * (
                                     -ddir * jac_Gam[i, ii, lrec_a, iv, k] * df)
-                            # src_z direct-field correction: d(exp(-G*|zsrc-zrec|))/d(zsrc)
-                            # = exp * G * sign(zrec-zsrc)  [d13/d45: eq. 5.22 analogy]
+                            # src_z direct-field: d(exp(-G*|zsrc-zrec|))/d(zsrc) = +G*dsign*exp
                             if src_z_col >= 0:
                                 pre_jg[i, ii, iv, src_z_col] += (
                                     sfact * G_lr * dsign * df)
+                            # rec_z direct-field: d(exp(-G*|zsrc-zrec|))/d(zrec) = -G*dsign*exp
+                            if rec_z_col >= 0:
+                                pre_jg[i, ii, iv, rec_z_col] += (
+                                    -sfact * G_lr * dsign * df)
 
         else:   # lsrc_a != lrec_a
             ddepth_f = (0.0 if lrec_a == nlayer - 1
