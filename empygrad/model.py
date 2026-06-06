@@ -677,7 +677,14 @@ _SRC_POS_PARAMS = frozenset({'src_x', 'src_y', 'src_z'})
 # Receiver-position parameters.
 _REC_POS_PARAMS = frozenset({'rec_z'})
 
-_ALL_JAC_PARAMS = _ETA_TYPE_PARAMS | _GEO_TYPE_PARAMS | _SRC_POS_PARAMS | _REC_POS_PARAMS
+# Horizontal source-receiver offset.  Unlike all other parameters, the offset
+# Jacobian is a pure post-processing of the *primal* wavenumber-domain arrays
+# (it enters only through the Bessel functions in the Hankel transform), so it
+# does not flow through the kernel Jacobian machinery at all.
+_OFFSET_PARAMS = frozenset({'off'})
+
+_ALL_JAC_PARAMS = (_ETA_TYPE_PARAMS | _GEO_TYPE_PARAMS | _SRC_POS_PARAMS
+                   | _REC_POS_PARAMS | _OFFSET_PARAMS)
 
 
 def _parse_jac(jac):
@@ -808,6 +815,72 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso, freq):
     jac_etaH = np.concatenate(seeds_H, axis=2)
     jac_etaV = np.concatenate(seeds_V, axis=2)
     return jac_etaH, jac_etaV, param_slices
+
+
+def _offset_derivative(PJ0, PJ1, PJ0b, lambd, off, filt, ang_fact, ab):
+    r"""Return ``d(EM)/d(off)``: the horizontal-offset derivative of the field.
+
+    The offset ``r`` enters the forward model *only* through the Bessel
+    functions :math:`J_\nu(\lambda r)` in the Hankel transform.  Using the
+    Bessel-derivative identity
+    :math:`\partial_r J_\nu(\lambda r) = \lambda J_{\nu-1}(\lambda r)
+    - (\nu/r) J_\nu(\lambda r)`, the derivative of a Hankel transform of order
+    ``nu`` is
+
+    .. math::
+        \frac{\partial}{\partial r} H_\nu[f](r)
+        = H_{\nu-1}[\lambda f](r) - \frac{\nu}{r} H_\nu[f](r).
+
+    The primal field is assembled by :func:`empymod.transform.dlf` from
+    ``(PJ0, PJ1, PJ0b)`` with PJ0/PJ0b mapped to :math:`J_0` and PJ1 to
+    :math:`J_1` (or :math:`J_2` for ``ab`` in the J2 set).  Applying the rule
+    above to each Bessel component yields the offset derivative directly from
+    the primal arrays — no kernel re-evaluation.
+
+    Parameters mirror :func:`empymod.transform.dlf` (standard DLF,
+    ``pts_per_dec=0``).  ``PJ*`` have shape ``(nfreq, noff, nlambda)`` (or
+    ``None``); ``lambd`` is ``(noff, nlambda)``; ``off`` and ``ang_fact`` are
+    ``(noff,)``.  Returns ``(nfreq, noff)``.
+    """
+    j0, j1 = filt.j0, filt.j1
+    ref = PJ0 if PJ0 is not None else (PJ1 if PJ1 is not None else PJ0b)
+    if ref is None:        # ab = 36/63: zero field, zero derivative
+        return np.zeros((1, off.size), dtype=complex)
+
+    nfreq = ref.shape[0]
+    r   = off[None, :]              # (1, noff)
+    lam = lambd[None, :, :]         # (1, noff, nlambda)
+
+    def H0(X):                      # H_0[X](r) = (X . j0) / r
+        return (X @ j0) / r
+    def H1(X):                      # H_1[X](r) = (X . j1) / r
+        return (X @ j1) / r
+
+    dG = np.zeros((nfreq, off.size), dtype=ref.dtype)
+
+    # Angle-independent J0 part:  B = H_0[PJ0];  B' = -H_1[lambda*PJ0]
+    if PJ0 is not None:
+        dG += -H1(lam * PJ0)
+
+    # Angle-dependent part A; A' differs for J1 vs J2 (the J2 set carries an
+    # extra 1/r in the primal, see empymod.transform.dlf).
+    A_prime = np.zeros((nfreq, off.size), dtype=ref.dtype)
+    j2_ab = ab in (11, 12, 21, 22, 14, 24, 15, 25)
+    if not j2_ab:
+        # A = H_1[PJ1] + H_0[PJ0b]
+        if PJ1 is not None:
+            A_prime += H0(lam * PJ1) - H1(PJ1) / r
+        if PJ0b is not None:
+            A_prime += -H1(lam * PJ0b)
+    else:
+        # A = H_1[PJ1]/r + H_0[PJ0b]   (the 1/r encodes the J2 structure)
+        if PJ1 is not None:
+            A_prime += H0(lam * PJ1) / r - 2.0 * H1(PJ1) / r**2
+        if PJ0b is not None:
+            A_prime += -H1(lam * PJ0b)
+
+    dG += ang_fact * A_prime
+    return dG
 
 
 def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
@@ -962,6 +1035,10 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
           Not supported for ME mode (magnetic receiver, electric source).
         - ``'rec_z'`` : ``d(EM)/d(z_rec)``, shape ``(nfreq, nrec, 1)``.
           Not supported for ME mode (magnetic receiver, electric source).
+        - ``'off'`` : ``d(EM)/d(r)`` w.r.t. the radial source-receiver offset
+          (angle held fixed), shape ``(nfreq, nrec, 1)``.  Computed from the
+          Bessel-derivative of the Hankel transform applied to the primal
+          wavenumber arrays — does not flow through the kernel Jacobian.
         - ``'src_x'``, ``'src_y'`` : not yet implemented.
 
         If *jac* is a single string, the Jacobian is returned as an ndarray.
@@ -1126,6 +1203,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
     has_src_z = 'src_z' in jac_params
     has_rec_z = 'rec_z' in jac_params
+    has_off   = 'off' in jac_params   # offset derivative — handled separately
 
     eta_params   = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
     depth_params = [p for p in jac_params if p in _GEO_DEPTH_PARAMS]
@@ -1269,35 +1347,50 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
     jac_EM = np.zeros((freq.size, off.size, n_params), dtype=etaH.dtype)
 
-    if not (loop_freq or loop_off):
-        # --- Default: single vectorised pass over all freqs and offsets ---
-        jPJ0, jPJ1, jPJ0b = _run_wavenumber(
-            etaH, etaV, zetaH, zetaV, lambd, jac_etaH_in, jac_etaV_in)
-        _dlf_cols(jPJ0, jPJ1, jPJ0b, lambd, off, ang_fact, jac_EM)
+    if n_params > 0:   # kernel-flowing params (eta/depth/src_z/rec_z)
+        if not (loop_freq or loop_off):
+            # --- Default: single vectorised pass over all freqs and offsets ---
+            jPJ0, jPJ1, jPJ0b = _run_wavenumber(
+                etaH, etaV, zetaH, zetaV, lambd, jac_etaH_in, jac_etaV_in)
+            _dlf_cols(jPJ0, jPJ1, jPJ0b, lambd, off, ang_fact, jac_EM)
 
-    elif loop_freq:
-        # --- Memory-saving: one frequency at a time ---
-        for i_f in range(freq.size):
-            jPJ0_f, jPJ1_f, jPJ0b_f = _run_wavenumber(
-                etaH [None, i_f, :], etaV [None, i_f, :],
-                zetaH[None, i_f, :], zetaV[None, i_f, :],
-                lambd,
-                jac_etaH_in[None, i_f, :, :], jac_etaV_in[None, i_f, :, :])
-            _dlf_cols(jPJ0_f, jPJ1_f, jPJ0b_f, lambd, off, ang_fact,
-                      jac_EM[i_f:i_f+1, :, :])
+        elif loop_freq:
+            # --- Memory-saving: one frequency at a time ---
+            for i_f in range(freq.size):
+                jPJ0_f, jPJ1_f, jPJ0b_f = _run_wavenumber(
+                    etaH [None, i_f, :], etaV [None, i_f, :],
+                    zetaH[None, i_f, :], zetaV[None, i_f, :],
+                    lambd,
+                    jac_etaH_in[None, i_f, :, :], jac_etaV_in[None, i_f, :, :])
+                _dlf_cols(jPJ0_f, jPJ1_f, jPJ0b_f, lambd, off, ang_fact,
+                          jac_EM[i_f:i_f+1, :, :])
 
-    else:   # loop_off
-        # --- Memory-saving: one offset at a time ---
-        for ii in range(off.size):
-            lmbd_ii = lambd[ii:ii+1, :]   # shape (1, nlambda)
-            af_ii   = ang_fact[ii:ii+1]   # shape (1,) per offset
-            jPJ0_ii, jPJ1_ii, jPJ0b_ii = _run_wavenumber(
-                etaH, etaV, zetaH, zetaV,
-                lmbd_ii,
-                jac_etaH_in, jac_etaV_in)
-            _dlf_cols(jPJ0_ii, jPJ1_ii, jPJ0b_ii,
-                      lmbd_ii, off[ii:ii+1], af_ii,
-                      jac_EM[:, ii:ii+1, :])
+        else:   # loop_off
+            # --- Memory-saving: one offset at a time ---
+            for ii in range(off.size):
+                lmbd_ii = lambd[ii:ii+1, :]   # shape (1, nlambda)
+                af_ii   = ang_fact[ii:ii+1]   # shape (1,) per offset
+                jPJ0_ii, jPJ1_ii, jPJ0b_ii = _run_wavenumber(
+                    etaH, etaV, zetaH, zetaV,
+                    lmbd_ii,
+                    jac_etaH_in, jac_etaV_in)
+                _dlf_cols(jPJ0_ii, jPJ1_ii, jPJ0b_ii,
+                          lmbd_ii, off[ii:ii+1], af_ii,
+                          jac_EM[:, ii:ii+1, :])
+
+    # --- Offset ('off') column: post-process the PRIMAL wavenumber arrays ---
+    # The offset derivative does not flow through the kernel Jacobian; it is the
+    # Bessel-derivative of the Hankel transform applied to the primal PJ arrays.
+    if has_off:
+        PJ0_p, PJ1_p, PJ0b_p = kernel.wavenumber(
+            zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
+            lambd, ab_calc, xdirect, msrc, mrec)
+        off_col = _offset_derivative(
+            PJ0_p, PJ1_p, PJ0b_p, lambd, off, htarg_jac['dlf'], ang_fact,
+            ab_calc)
+        jac_EM = np.concatenate([jac_EM, off_col[:, :, None]], axis=2)
+        all_slices['off'] = slice(n_params, n_params + 1)
+        n_params += 1
 
     # Fourier (f→t) transform if time-domain — chain rule: J_t = FT[J_f]
     if signal is not None:
