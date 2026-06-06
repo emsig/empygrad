@@ -407,3 +407,60 @@ def test_jac_res_and_aniso_dict(model_aniso):
         aniso=m["aniso"], freqtime=m["freqtime"], ab=m["ab"], verb=0,
         jac='res')
     assert_allclose(jac_dict['res'], jac_res_standalone, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# res Jacobian with anisotropic layers (regression for diag_V bug fix)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def model_res_aniso():
+    """3-layer marine model with non-trivial anisotropy for res-Jacobian test.
+
+    aniso[1]=2.0 means etaV[1] = sigma_h[1]/4, so d(etaV)/d(res[1]) differs
+    from d(etaH)/d(res[1]) by a factor of aniso[1]^2 = 4.  This catches the
+    bug where diag_V was set to -1/res^2 instead of -1/(res^2 * aniso^2).
+    """
+    return dict(
+        src=[0., 0., 100.],
+        rec=[[1000., 2000.], [0., 0.], 200.],
+        depth=[0., 500.],
+        res=np.array([1e20, 1.0, 100.0]),
+        aniso=np.array([1.0, 2.0, 1.0]),
+        freqtime=[0.5, 1.0],
+        ab=11,
+    )
+
+
+@pytest.mark.parametrize("k", [1, 2])
+def test_jac_res_anisotropic_vs_fd(model_res_aniso, k):
+    """res Jacobian must match FD when aniso != 1 (k=0 air layer skipped).
+
+    This is the regression test for the diag_V seed bug: the vertical
+    admittance seed was -1/res^2 instead of -1/(res^2 * aniso^2), which only
+    matters for layers where aniso != 1.
+    """
+    m = model_res_aniso
+    h = 1e-4
+
+    _, jac_EM = dipole(
+        src=m["src"], rec=m["rec"], depth=m["depth"], res=m["res"],
+        aniso=m["aniso"], freqtime=m["freqtime"], ab=m["ab"], verb=0,
+        jac='res')
+
+    res_p = m["res"].copy(); res_p[k] *= (1.0 + h)
+    res_m = m["res"].copy(); res_m[k] *= (1.0 - h)
+
+    EM_p = empymod.dipole(
+        src=m["src"], rec=m["rec"], depth=m["depth"], res=res_p,
+        aniso=m["aniso"], freqtime=m["freqtime"], ab=m["ab"], verb=0)
+    EM_m = empymod.dipole(
+        src=m["src"], rec=m["rec"], depth=m["depth"], res=res_m,
+        aniso=m["aniso"], freqtime=m["freqtime"], ab=m["ab"], verb=0)
+
+    dEM_fd = (np.asarray(EM_p) - np.asarray(EM_m)) / (2.0 * h * m["res"][k])
+
+    norm = max(np.max(np.abs(dEM_fd)), 1e-30)
+    assert_allclose(
+        jac_EM[:, :, k] / norm, dEM_fd / norm, atol=1e-4,
+        err_msg=f"res Jacobian FD mismatch for anisotropic model, layer k={k}")

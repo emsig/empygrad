@@ -718,11 +718,12 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso):
         j_V = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
 
         if p == 'res':
-            # etaH = etaV = iw*eps0*eperm + 1/res  (isotropic horizontal)
-            # d(eta[i,j])/d(res[k]) = -delta(j,k) / res[k]^2
-            diag = -1.0 / res**2
-            j_H[:, idx, idx] = diag
-            j_V[:, idx, idx] = diag
+            # etaH = iw*eps0*epermH + 1/res  => d(etaH)/d(res[k]) = -1/res[k]^2
+            # etaV = iw*eps0*epermV + 1/(res*aniso^2)  => d(etaV)/d(res[k]) = -1/(res[k]^2 * aniso[k]^2)
+            diag_H = -1.0 / res**2
+            diag_V = -1.0 / (res**2 * aniso**2)
+            j_H[:, idx, idx] = diag_H
+            j_V[:, idx, idx] = diag_V
 
         elif p == 'aniso':
             # etaV = iw*eps0*epermV + sigma_h/aniso^2;  etaH independent of aniso
