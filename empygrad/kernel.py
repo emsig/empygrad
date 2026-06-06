@@ -333,6 +333,13 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
                      jac_etaH, jac_etaV):
     """Fill jac_Gam in-place for the TM non-MM case (explicit scalar loops).
 
+    Implements d(Gam_TM)/d(p) = d(Gam_TM^2)/d(p) / (2*Gam_TM)  using:
+      d(Gam^2)/d(etaH) = kappa^2/etaV + zetaH    d13(2.4) / jac(2a)
+      d(Gam^2)/d(etaV) = -etaH * kappa^2/etaV^2  d13(2.8) / jac(2b)
+
+    Also used for TE-MM: Gam_TE_MM^2 = (etaH/etaV)*kappa^2 + zetaH*etaH
+    is algebraically identical to the TM formula with pre-swap values.
+
     Avoids allocating intermediate 5D broadcast arrays.
     jac_Gam shape: (nfreq, noff, nlayer, nlambda, nlayer_res)
     """
@@ -360,7 +367,9 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
 def _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH):
     """Fill jac_Gam in-place for the TE non-MM and TM-MM cases.
 
-    Both share: d(Gam^2)/d(p) = zetaH * jac_etaH  (d_zetaH = 0 for non-magnetic earth).
+    Both share: d(Gam_TE^2)/d(etaH) = zetaH  d13(2.16) / jac(3c)
+    (d_zetaH = 0 for non-magnetic earth; the zetaH/zetaV anisotropy term
+    vanishes and only the bulk term zetaH*etaH contributes).
     TE-MM uses _fill_jac_Gam_TM with pre-swap values instead.
     """
     nfreq, noff, nlayer, nlambda, nlayer_res = jac_Gam.shape
@@ -1280,12 +1289,16 @@ def _reflections_jac(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam):
                     for iv in range(nlambda):
                         G_izpm = Gam[i, ii, iz_pm, iv]
                         G_iz   = Gam[i, ii, iz,    iv]
+                        # r_n = (eta_{n+1}*Gam_n - eta_n*Gam_{n+1})
+                        #      / (eta_{n+1}*Gam_n + eta_n*Gam_{n+1})   d13(3.1)/H-65
                         A      = e_izpm_i * G_iz
                         B      = e_iz_i   * G_izpm
                         ApB    = A + B
                         rloc   = (A - B) / ApB
 
-                        # Jacobian of rloc (chain rule through A and B)
+                        # d(r_n)/d(p): quotient rule 2*(jA*B - A*jB)/(A+B)^2  d13(3.2)
+                        # jA = d(eta_{n+1}*Gam_n)/d(p), jB = d(eta_n*Gam_{n+1})/d(p)
+                        #   via d(eta*Gam)/d(p) = jac_e_zH*Gam + eta*jac_Gam   d13(3.8-3.11)
                         for k in range(nlayer_res):
                             jA = (jac_e_zH[i, iz_pm, k] * G_iz
                                   + e_izpm_i * jac_Gam[i, ii, iz, iv, k])
@@ -1298,15 +1311,20 @@ def _reflections_jac(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam):
                             for k in range(nlayer_res):
                                 jtRef[i, ii, iv, k] = jrloc[i, ii, iv, k]
                         else:
+                            # X_n = R^-_{n+1} * exp(-2*Gam_{n+1}*d_{n+1})    d45(4.2)
+                            # R^-_n = (r_n + X_n) / (1 + r_n*X_n)             d45(4.3)
                             E_val    = np.exp(-2.0 * G_izpm * ddepth)
                             tRef_old = tRef[i, ii, iv]
                             term     = tRef_old * E_val
                             G2       = 1.0 + rloc * term
                             tRef[i, ii, iv] = (rloc + term) / G2
                             for k in range(nlayer_res):
+                                # d(X_n)/d(Gam_{n+1}) = -2*d_{n+1}*X_n       d45(4.16)
                                 jE    = (-2.0 * ddepth
                                          * jac_Gam[i, ii, iz_pm, iv, k] * E_val)
                                 jterm = jtRef[i, ii, iv, k] * E_val + tRef_old * jE
+                                # d(R^-_n)/d(r_n) = (1-X^2)/(1+r*X)^2        d45(4.6)
+                                # d(R^-_n)/d(X_n) = (1-r^2)/(1+r*X)^2        d45(4.9)
                                 jtRef[i, ii, iv, k] = (
                                     (1.0 - term ** 2) * jrloc[i, ii, iv, k]
                                     + (1.0 - rloc ** 2) * jterm
@@ -1594,6 +1612,8 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                                     + R0_v * je_dm
                                 )
             else:
+                # A^-_s = R^+_s * [U^+ + R^-_s*U^-*exp(-Gam_s*d_s)] / M_s  d45(5.5)/H-66
+                # M_s = 1 - R^-_s*R^+_s*exp(-2*Gam_s*d_s)                   d45(5.1)/H-83
                 # P = ((e_dm + pm*Rpm0*e_dsdp)*Rmp0) / (1 - Rmp0*Rpm0*e_2ds)
                 for i in range(nfreq):
                     for ii in range(noff):
@@ -1605,7 +1625,7 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             Rmp0_v  = Rmp[i, ii, 0, iv]
                             Rpm0_v  = Rpm[i, ii, 0, iv]
                             p2_v    = pm * Rpm0_v * e_dsdp_v
-                            p3_v    = 1.0 - Rmp0_v * Rpm0_v * e_2ds_v
+                            p3_v    = 1.0 - Rmp0_v * Rpm0_v * e_2ds_v  # M_s
                             edm_p2  = e_dm_v + p2_v
                             num_v   = edm_p2 * Rmp0_v
                             P[i, ii, iv] = num_v / p3_v
@@ -1617,11 +1637,13 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                                 jR0_k     = jac_Rmp[i, ii, 0, iv, k]
                                 jRpm0_k   = jac_Rpm[i, ii, 0, iv, k]
                                 jp2 = pm * (jRpm0_k * e_dsdp_v + Rpm0_v * je_dsdp_k)
+                                # d(M_s)/d(p): d45(5.7-5.9)
                                 jp3 = -(
                                     (jR0_k * Rpm0_v + Rmp0_v * jRpm0_k) * e_2ds_v
                                     + Rmp0_v * Rpm0_v * je_2ds_k
                                 )
                                 jnum = (je_dm_k + jp2) * Rmp0_v + edm_p2 * jR0_k
+                                # d(A^-_s)/d(p) = (d(N)*M - N*d(M)) / M^2    d45(5.11-5.13)
                                 jP[i, ii, iv, k] = (
                                     (jnum * p3_v - num_v * jp3) / p3_v ** 2
                                 )
@@ -1645,6 +1667,9 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                                     jRr_k * e_dp_v + (1.0 + Rr_v) * je_dp
                                 )
             else:
+                # P-factor for receiver in non-source layer: product of transmission
+                # coefficients through each intervening layer  d45(5.26)/jac(§5.3)
+                # M_s = 1 - R^-*R^+*exp(-2*Gam_s*d_s)  d45(5.1)/H-83
                 # P = (mupm*e_dp + pm*mupm*Rmp[rsrcl]*e_dsdm) * (1+Rpm[rsrcl])
                 #     / (1 - Rmp[rsrcl]*Rpm[rsrcl]*e_2ds)
                 for i in range(nfreq):
