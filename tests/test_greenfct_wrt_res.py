@@ -146,3 +146,66 @@ def test_jacobian_vs_fd(model, lsrc, lrec, zsrc, zrec, xdirect, k):
     assert_allclose(
         jac_GTE[..., k] / norm_TE, dGTE_fd / norm_TE, atol=1e-4,
         err_msg=f"jac_GTE FD mismatch for lsrc={lsrc}, lrec={lrec}, k={k}")
+
+
+# ---------------------------------------------------------------------------
+# 3. All ab combinations — different-layer geometry, k=1 and k=2
+# ---------------------------------------------------------------------------
+# Source and receiver in different layers exercises the full ab-specific
+# scaling block in _greenfct_jac (fTM/fTE factors, sign conventions).  k=0
+# (air, res=1e8) is at the noise floor for all ab at 1 Hz and is skipped.
+#
+# msrc / mrec are derived from the ab digits:
+#   first digit >= 4  → mrec=True  (magnetic receiver)
+#   second digit >= 4 → msrc=True  (magnetic source)
+# All ab values 11–35 have a first digit <= 3, so mrec=False throughout.
+
+@pytest.mark.parametrize("ab", [11, 12, 13, 14, 15, 16,
+                                  21, 22, 23, 24, 25, 26,
+                                  31, 32, 33, 34, 35])
+@pytest.mark.parametrize("k", [1, 2])
+def test_jacobian_all_ab_vs_fd(model, ab, k):
+    """jac_GTM[...,k] and jac_GTE[...,k] must match FD for every ab code.
+
+    Uses lsrc=1, lrec=2 (receiver below source) to exercise the
+    inter-layer P-factor path and the ab-specific fTM/fTE scaling.
+    Catches missing or sign-flipped ab-factor derivatives.
+    """
+    m = model
+    lsrc, lrec, zsrc, zrec, xdirect = 1, 2, 100.0, 600.0, False
+    msrc = (ab % 10) >= 4   # magnetic source when source digit >= 4
+    mrec = (ab // 10) >= 4  # always False for ab in 11–35
+    eps = 1e-7
+
+    _, _, jac_GTM, jac_GTE = greenfct(
+        zsrc, zrec, lsrc, lrec, m["depth_v"],
+        m["etaH"], m["etaV"], m["zetaH"], m["zetaV"], m["lambd"],
+        ab, xdirect, msrc, mrec, m["jac_etaH"], m["jac_etaV"])
+
+    d_etaH = m["jac_etaH"][:, :, k]
+    d_etaV = m["jac_etaV"][:, :, k]
+
+    GTM_p, GTE_p = greenfct(
+        zsrc, zrec, lsrc, lrec, m["depth_v"],
+        m["etaH"] + eps * d_etaH, m["etaV"] + eps * d_etaV,
+        m["zetaH"], m["zetaV"], m["lambd"],
+        ab, xdirect, msrc, mrec)
+
+    GTM_m, GTE_m = greenfct(
+        zsrc, zrec, lsrc, lrec, m["depth_v"],
+        m["etaH"] - eps * d_etaH, m["etaV"] - eps * d_etaV,
+        m["zetaH"], m["zetaV"], m["lambd"],
+        ab, xdirect, msrc, mrec)
+
+    dGTM_fd = (GTM_p - GTM_m) / (2.0 * eps)
+    dGTE_fd = (GTE_p - GTE_m) / (2.0 * eps)
+
+    norm_TM = max(np.max(np.abs(dGTM_fd)), 1e-30)
+    norm_TE = max(np.max(np.abs(dGTE_fd)), 1e-30)
+
+    assert_allclose(
+        jac_GTM[..., k] / norm_TM, dGTM_fd / norm_TM, atol=1e-4,
+        err_msg=f"jac_GTM FD mismatch for ab={ab}, k={k}")
+    assert_allclose(
+        jac_GTE[..., k] / norm_TE, dGTE_fd / norm_TE, atol=1e-4,
+        err_msg=f"jac_GTE FD mismatch for ab={ab}, k={k}")
