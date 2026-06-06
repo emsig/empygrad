@@ -945,8 +945,10 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         If *jac* is a single string, the Jacobian is returned as an ndarray.
         If *jac* is a list, a ``dict {param: ndarray}`` is returned.
 
-        Restrictions: requires ``signal=None`` (frequency domain) and
-        ``ht='dlf'``; raises ``NotImplementedError`` otherwise.
+        Restrictions: requires ``ht='dlf'``; raises ``NotImplementedError``
+        otherwise.  Time-domain Jacobians (``signal != None``) are supported
+        by applying the Fourier transform column-by-column to the
+        frequency-domain Jacobian (chain rule: ``J_t = FT[J_f]``).
 
 
     Returns
@@ -1001,10 +1003,6 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
     # Jacobian restrictions — raise before touching any heavy computation.
     if jac_params is not None:
-        if signal is not None:
-            raise NotImplementedError(
-                "Jacobian w.r.t. time-domain response is not yet implemented; "
-                "use signal=None.")
         if ht != 'dlf':
             raise NotImplementedError(
                 "Jacobian computation requires ht='dlf'.")
@@ -1223,7 +1221,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         jac_dlo_in, jac_src_z_indicator, src_z_col_idx,
         jac_rec_z_indicator, rec_z_col_idx)
 
-    # DLF transform is linear — apply column-by-column over n_params.
+    # DLF (Hankel) transform — linear, apply column-by-column over n_params.
     jac_EM = np.zeros((freq.size, off.size, n_params), dtype=etaH.dtype)
     for k in range(n_params):
         jac_PJ_k = (
@@ -1235,9 +1233,16 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
             jac_PJ_k, lambd, off, htarg['dlf'], htarg['pts_per_dec'],
             ang_fact=ang_fact, ab=ab_calc, int_pts=int_pts)
 
-    # Reshape Jacobian to (nfreq, nrec, nsrc, n_params), then drop the nsrc
-    # axis when nsrc=1 (matching empymod's convention for dipole).  We never
-    # squeeze nrec so the parameter axis stays as the last dimension.
+    # Fourier (f→t) transform if time-domain — chain rule: J_t = FT[J_f]
+    if signal is not None:
+        jac_EM_time = np.zeros((time.size, off.size, n_params))
+        for k in range(n_params):
+            jac_EM_time[:, :, k], _ = tem(
+                jac_EM[:, :, k], off, freq, time, signal, ft, ftarg)
+        jac_EM = jac_EM_time
+
+    # Reshape Jacobian to (ntime_or_nfreq, nrec, nsrc, n_params), drop nsrc when 1.
+    # The -1 adapts to time.size or freq.size automatically.
     jac_EM = jac_EM.reshape((-1, nrec, nsrc, n_params), order='F')
     if nsrc == 1:
         jac_EM = jac_EM[:, :, 0, :]  # (nfreq, nrec, n_params)
