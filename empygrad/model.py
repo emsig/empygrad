@@ -1137,14 +1137,19 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     # kernel internally and cannot accept pre-computed PJ arrays.
     # For ht='qwe'/'quad', the primal uses QWE/QUAD while the Jacobian uses
     # default DLF — both are accurate for well-conditioned models.
+    # Always use standard DLF (pts_per_dec=0) for the Jacobian.  This ensures
+    # int_pts=None, which makes loop_off slicing straightforward and avoids
+    # splined-DLF interpolation complexity in the loop branches.
     if ht == 'dlf':
-        htarg_jac = htarg
+        htarg_jac = dict(htarg)
+        htarg_jac['pts_per_dec'] = 0   # override to standard (non-splined) DLF
     else:
         _, htarg_jac = check_hankel('dlf', {}, 0)
 
     ang_fact = kernel.angle_factor(angle, ab_calc, msrc, mrec)
     lambd, int_pts = transform.get_dlf_points(
         htarg_jac['dlf'], off, htarg_jac['pts_per_dec'])
+    # int_pts is always None here (pts_per_dec=0)
 
     # --- Build eta seeds ---
     if eta_params:
@@ -1236,24 +1241,63 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     if has_rec_z:
         jac_rec_z_indicator[rec_z_col_idx] = 1.0
 
-    # Single kernel pass with all seed columns stacked.
-    _PJ0, _PJ1, _PJ0b, jac_PJ0, jac_PJ1, jac_PJ0b = kernel.wavenumber(
-        zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-        lambd, ab_calc, xdirect, msrc, mrec, jac_etaH_in, jac_etaV_in,
-        jac_dlo_in, jac_src_z_indicator, src_z_col_idx,
-        jac_rec_z_indicator, rec_z_col_idx)
+    # Shared keyword args for transform.dlf calls below
+    _dlf_kw = dict(dlf=htarg_jac['dlf'], pts_per_dec=0,
+                   ang_fact=ang_fact, ab=ab_calc, int_pts=None)
 
-    # DLF (Hankel) transform — linear, apply column-by-column over n_params.
+    def _run_wavenumber(eH, eV, zH, zV, lmbd, jH, jV):
+        """Single kernel.wavenumber call; returns (jPJ0, jPJ1, jPJ0b)."""
+        _, _, _, jPJ0, jPJ1, jPJ0b = kernel.wavenumber(
+            zsrc, zrec, lsrc, lrec, depth, eH, eV, zH, zV,
+            lmbd, ab_calc, xdirect, msrc, mrec, jH, jV,
+            jac_dlo_in, jac_src_z_indicator, src_z_col_idx,
+            jac_rec_z_indicator, rec_z_col_idx)
+        return jPJ0, jPJ1, jPJ0b
+
+    def _dlf_cols(jPJ0, jPJ1, jPJ0b, lmbd, off_arr, af, dest):
+        """DLF-transform each Jacobian column into dest[:, :, :]."""
+        kw = dict(_dlf_kw); kw['ang_fact'] = af; kw['int_pts'] = None
+        for k in range(n_params):
+            jac_PJ_k = (
+                jPJ0[:, :, :, k]  if jPJ0  is not None else None,
+                jPJ1[:, :, :, k]  if jPJ1  is not None else None,
+                jPJ0b[:, :, :, k] if jPJ0b is not None else None,
+            )
+            dest[:, :, k] = transform.dlf(
+                jac_PJ_k, lmbd, off_arr,
+                htarg_jac['dlf'], 0, ang_fact=af, ab=ab_calc, int_pts=None)
+
     jac_EM = np.zeros((freq.size, off.size, n_params), dtype=etaH.dtype)
-    for k in range(n_params):
-        jac_PJ_k = (
-            jac_PJ0[:, :, :, k]  if jac_PJ0  is not None else None,
-            jac_PJ1[:, :, :, k]  if jac_PJ1  is not None else None,
-            jac_PJ0b[:, :, :, k] if jac_PJ0b is not None else None,
-        )
-        jac_EM[:, :, k] = transform.dlf(
-            jac_PJ_k, lambd, off, htarg_jac['dlf'], htarg_jac['pts_per_dec'],
-            ang_fact=ang_fact, ab=ab_calc, int_pts=int_pts)
+
+    if not (loop_freq or loop_off):
+        # --- Default: single vectorised pass over all freqs and offsets ---
+        jPJ0, jPJ1, jPJ0b = _run_wavenumber(
+            etaH, etaV, zetaH, zetaV, lambd, jac_etaH_in, jac_etaV_in)
+        _dlf_cols(jPJ0, jPJ1, jPJ0b, lambd, off, ang_fact, jac_EM)
+
+    elif loop_freq:
+        # --- Memory-saving: one frequency at a time ---
+        for i_f in range(freq.size):
+            jPJ0_f, jPJ1_f, jPJ0b_f = _run_wavenumber(
+                etaH [None, i_f, :], etaV [None, i_f, :],
+                zetaH[None, i_f, :], zetaV[None, i_f, :],
+                lambd,
+                jac_etaH_in[None, i_f, :, :], jac_etaV_in[None, i_f, :, :])
+            _dlf_cols(jPJ0_f, jPJ1_f, jPJ0b_f, lambd, off, ang_fact,
+                      jac_EM[i_f:i_f+1, :, :])
+
+    else:   # loop_off
+        # --- Memory-saving: one offset at a time ---
+        for ii in range(off.size):
+            lmbd_ii = lambd[ii:ii+1, :]   # shape (1, nlambda)
+            af_ii   = ang_fact[ii:ii+1]   # shape (1,) per offset
+            jPJ0_ii, jPJ1_ii, jPJ0b_ii = _run_wavenumber(
+                etaH, etaV, zetaH, zetaV,
+                lmbd_ii,
+                jac_etaH_in, jac_etaV_in)
+            _dlf_cols(jPJ0_ii, jPJ1_ii, jPJ0b_ii,
+                      lmbd_ii, off[ii:ii+1], af_ii,
+                      jac_EM[:, ii:ii+1, :])
 
     # Fourier (f→t) transform if time-domain — chain rule: J_t = FT[J_f]
     if signal is not None:
