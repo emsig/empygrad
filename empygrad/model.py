@@ -667,9 +667,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 # Parameters whose Jacobian flows through d(etaH, etaV)/d(param) seeds.
 _ETA_TYPE_PARAMS = frozenset({'res', 'aniso'})
 
-# Parameters whose Jacobian requires kernel extensions for depth-dependent
-# exponentials (not yet implemented).
-_GEO_TYPE_PARAMS = frozenset({'depth', 'thickness'})
+# Parameters whose Jacobian flows through depth/thickness perturbations.
+_GEO_DEPTH_PARAMS = frozenset({'depth', 'thickness'})
+_GEO_TYPE_PARAMS  = _GEO_DEPTH_PARAMS  # legacy alias
 
 # Source-position parameters (not yet implemented).
 _SRC_POS_PARAMS = frozenset({'src_x', 'src_y', 'src_z'})
@@ -684,6 +684,46 @@ def _parse_jac(jac):
     if isinstance(jac, str):
         return [jac]
     return list(jac)
+
+
+def _stacked_depth_seeds(depth_params, n_interfaces):
+    """Compute jac_depth_lower for depth/thickness parameters.
+
+    Parameters
+    ----------
+    depth_params : list of str
+        Ordered subset of ``_GEO_DEPTH_PARAMS`` to include.
+    n_interfaces : int
+        Number of free interface positions (= nlayer - 1).
+
+    Returns
+    -------
+    jac_depth_lower : float64 ndarray, shape (n_interfaces, n_total)
+        ``jac_depth_lower[n, k] = d(depth_user[n]) / d(param_k)``.
+        For 'depth' params this is the identity block; for 'thickness'
+        (not yet implemented) it would encode layer thicknesses.
+    param_slices : dict
+        Maps each parameter name to its ``slice`` in the last axis.
+    """
+    seeds = []
+    param_slices = {}
+    col = 0
+
+    for p in depth_params:
+        if p == 'depth':
+            # d(depth_user[n])/d(depth_user[k]) = delta(n, k) → identity
+            jac = np.eye(n_interfaces)
+            seeds.append(jac)
+            param_slices['depth'] = slice(col, col + n_interfaces)
+            col += n_interfaces
+        elif p == 'thickness':
+            raise NotImplementedError(
+                "Jacobian w.r.t. 'thickness' is not yet implemented. "
+                "Use 'depth' (interface positions) instead.")
+
+    if seeds:
+        return np.concatenate(seeds, axis=1), param_slices
+    return np.zeros((n_interfaces, 0)), param_slices
 
 
 def _stacked_eta_seeds(eta_params, etaH, res, aniso):
@@ -890,7 +930,8 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         - ``None`` : return only *EM* (no Jacobian overhead).
         - ``'res'`` : ``d(EM)/d(res_k)``, shape ``(nfreq, nrec, nlayer)``.
         - ``'aniso'`` : ``d(EM)/d(aniso_k)``, shape ``(nfreq, nrec, nlayer)``.
-        - ``'depth'`` : not yet implemented.
+        - ``'depth'`` : ``d(EM)/d(depth[k])``, shape ``(nfreq, nrec, n_interfaces)``
+          where ``n_interfaces = len(depth)``; requires ``signal=None``, ``ht='dlf'``.
         - ``'thickness'`` : not yet implemented.
         - ``'src_x'``, ``'src_y'``, ``'src_z'`` : not yet implemented.
 
@@ -1062,34 +1103,73 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
             f"Unknown Jacobian parameter(s): {sorted(unknown)}. "
             f"Supported: {sorted(_ALL_JAC_PARAMS)}.")
 
-    geo_params = [p for p in jac_params if p in _GEO_TYPE_PARAMS]
-    if geo_params:
-        raise NotImplementedError(
-            f"Jacobian w.r.t. geometry parameters {geo_params} is not yet "
-            "implemented.")
-
     src_pos_params = [p for p in jac_params if p in _SRC_POS_PARAMS]
     if src_pos_params:
         raise NotImplementedError(
             f"Jacobian w.r.t. source-position parameters {src_pos_params} "
             "is not yet implemented.")
 
-    eta_params = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
+    eta_params   = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
+    depth_params = [p for p in jac_params if p in _GEO_DEPTH_PARAMS]
 
     # DLF filter points (shared with fem, but fem does not expose them).
     ang_fact = kernel.angle_factor(angle, ab_calc, msrc, mrec)
     lambd, int_pts = transform.get_dlf_points(
         htarg['dlf'], off, htarg['pts_per_dec'])
 
-    # Compute stacked d(etaH, etaV)/d(param) seeds.
-    jac_etaH, jac_etaV, param_slices = _stacked_eta_seeds(
-        eta_params, etaH, res, aniso)
-    n_params = jac_etaH.shape[2]
+    # --- Build eta seeds ---
+    if eta_params:
+        jac_etaH_eta, jac_etaV_eta, eta_slices = _stacked_eta_seeds(
+            eta_params, etaH, res, aniso)
+        n_eta = jac_etaH_eta.shape[2]
+    else:
+        n_eta = 0
+        eta_slices = {}
+        jac_etaH_eta = np.zeros((freq.size, etaH.shape[1], 0), dtype=etaH.dtype)
+        jac_etaV_eta = np.zeros_like(jac_etaH_eta)
+
+    # --- Build depth seeds ---
+    # depth[0] = -inf (added by check_model); free interfaces are depth[1:]
+    n_interfaces = depth.size - 1   # = nlayer - 1
+    if depth_params:
+        jac_depth_lower, depth_slices = _stacked_depth_seeds(
+            depth_params, n_interfaces)
+        n_depth = jac_depth_lower.shape[1]
+    else:
+        n_depth = 0
+        depth_slices = {}
+        jac_depth_lower = np.zeros((n_interfaces, 0))
+
+    n_params = n_eta + n_depth
+
+    # --- Combine into unified (nfreq, nlayer, n_params) arrays ---
+    if n_eta > 0 and n_depth > 0:
+        zeros_depth_eta = np.zeros((freq.size, etaH.shape[1], n_depth),
+                                   dtype=etaH.dtype)
+        jac_etaH_in = np.concatenate([jac_etaH_eta, zeros_depth_eta], axis=2)
+        jac_etaV_in = np.concatenate([jac_etaV_eta, zeros_depth_eta], axis=2)
+        zeros_eta_depth = np.zeros((n_interfaces, n_eta))
+        jac_dlo_in = np.concatenate([zeros_eta_depth, jac_depth_lower], axis=1)
+        all_slices = dict(eta_slices)
+        for name, sl in depth_slices.items():
+            all_slices[name] = slice(sl.start + n_eta, sl.stop + n_eta)
+    elif n_eta > 0:
+        jac_etaH_in = jac_etaH_eta
+        jac_etaV_in = jac_etaV_eta
+        jac_dlo_in  = np.zeros((n_interfaces, n_eta))
+        all_slices  = eta_slices
+    else:  # depth only
+        jac_etaH_in = np.zeros((freq.size, etaH.shape[1], n_depth),
+                               dtype=etaH.dtype)
+        jac_etaV_in = np.zeros_like(jac_etaH_in)
+        jac_dlo_in  = jac_depth_lower
+        all_slices  = depth_slices
 
     # Single kernel pass with all seed columns stacked.
     _PJ0, _PJ1, _PJ0b, jac_PJ0, jac_PJ1, jac_PJ0b = kernel.wavenumber(
         zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-        lambd, ab_calc, xdirect, msrc, mrec, jac_etaH, jac_etaV)
+        lambd, ab_calc, xdirect, msrc, mrec, jac_etaH_in, jac_etaV_in,
+        jac_dlo_in)
 
     # DLF transform is linear — apply column-by-column over n_params.
     jac_EM = np.zeros((freq.size, off.size, n_params), dtype=etaH.dtype)
@@ -1111,7 +1191,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         jac_EM = jac_EM[:, :, 0, :]  # (nfreq, nrec, n_params)
 
     # Slice into per-parameter arrays and return.
-    jac_out = {p: jac_EM[..., sl] for p, sl in param_slices.items()}
+    jac_out = {p: jac_EM[..., sl] for p, sl in all_slices.items()}
 
     if isinstance(jac, str):
         return EM_out, jac_out[jac]

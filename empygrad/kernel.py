@@ -57,7 +57,8 @@ _NB_PAR = {'nogil': True, 'cache': True, 'parallel': True}
 
 # Wavenumber-frequency domain kernel
 def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-                   lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None):
+                   lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None,
+                   jac_depth_lower=None):
     r"""Wavenumber-domain solution and optionally its Jacobian w.r.t. horizontal resistivity.
 
     Calls :func:`greenfct` to obtain the primal Green's functions
@@ -99,7 +100,7 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     # ** PRIMAL (+ optionally JACOBIAN) from greenfct
     _gfct = greenfct(
         zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-        lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV)
+        lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower)
     if jac_mode:
         PTM, PTE, jac_PTM, jac_PTE = _gfct
     else:
@@ -286,7 +287,8 @@ def _wavenumber_jac_collect(jac_PTM, jac_PTE, lambd, ab, sign,
 
 
 def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-             lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None):
+             lambd, ab, xdirect, msrc, mrec, jac_etaH=None, jac_etaV=None,
+             jac_depth_lower=None):
     r"""Green's function and optionally its Jacobian w.r.t. horizontal resistivity.
 
     Propagates the resistivity Jacobians ``jac_etaH`` and ``jac_etaV``
@@ -324,9 +326,13 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         return _empymod_kernel.greenfct(
             zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
             lambd, ab, xdirect, msrc, mrec)
+    nfreq, nlayer = etaH.shape
+    nlayer_res = jac_etaH.shape[2]
+    if jac_depth_lower is None:
+        jac_depth_lower = np.zeros((nlayer - 1, nlayer_res))
     return _greenfct_jac(
         zsrc, zrec, int(lsrc), int(lrec), depth, etaH, etaV, zetaH, zetaV,
-        lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV)
+        lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower)
 
 @nb.njit(**_NB_PAR)
 def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
@@ -388,12 +394,16 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, zetaH, jac_etaH):
 
 @nb.njit(**_NB_PAR)
 def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-                  lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV):
+                  lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV,
+                  jac_depth_lower):
     """JIT-compiled Green's function with Jacobian.
 
     Mirrors ``_greenfct_numpy`` with explicit scalar loops instead of
     numpy broadcasting, eliminating intermediate 4-D/5-D temporaries.
     Always returns (GTM, GTE, jac_GTM, jac_GTE).
+
+    jac_depth_lower : float64 ndarray, shape (nlayer-1, nlayer_res)
+        d(depth_user[n])/d(param_k).  Pass zeros for eta-only callers.
     """
     nfreq, nlayer = etaH.shape
     noff, nlambda = lambd.shape
@@ -416,6 +426,29 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         else:
             zsrc_a = zrec;  zrec_a = zsrc
             lsrc_a = lrec;  lrec_a = lsrc
+
+    # --- Precompute depth-parameter distance sensitivities ---
+    # These are needed inside the TM/TE loop for Wu/Wd and _fields_jac.
+    # jac_dists[0/1/2, k] = d(dp)/dk, d(dm)/dk, d(ds)/dk  for source layer lsrc_a
+    # jac_ddu[k] = d(ddu)/dk, jac_ddd[k] = d(ddd)/dk  for receiver layer lrec_a
+    n_interfaces = nlayer - 1
+    jac_dists = np.zeros((3, nlayer_res))
+    jac_ddu   = np.zeros(nlayer_res)
+    jac_ddd   = np.zeros(nlayer_res)
+    for k in range(nlayer_res):
+        jdp = 0.0
+        jdm = 0.0
+        if lsrc_a < n_interfaces:   # has a lower boundary in depth_user
+            jdp = jac_depth_lower[lsrc_a, k]
+        if lsrc_a > 0:              # has an upper boundary in depth_user
+            jdm = -jac_depth_lower[lsrc_a - 1, k]
+        jac_dists[0, k] = jdp
+        jac_dists[1, k] = jdm
+        jac_dists[2, k] = jdp + jdm
+        if lrec_a < n_interfaces:
+            jac_ddu[k] = jac_depth_lower[lrec_a, k]
+        if lrec_a > 0:
+            jac_ddd[k] = -jac_depth_lower[lrec_a - 1, k]
 
     # --- Pre-allocate TM/TE outputs (filled in-place in the loop below) ---
     gamTM       = np.zeros((nfreq, noff, nlayer, nlambda), dtype=dtype)
@@ -511,33 +544,40 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
 
         if nlayer > 1:
             Rp, Rm, jac_Rp, jac_Rm = _reflections_jac(
-                depth, e_zH, Gam, lrec_a, lsrc_a, jac_e_zH_l, jac_Gam)
+                depth, e_zH, Gam, lrec_a, lsrc_a, jac_e_zH_l, jac_Gam,
+                jac_depth_lower)
 
             if lrec_a != nlayer - 1:
                 ddu = depth[lrec_a + 1] - zrec_a
                 for i in nb.prange(nfreq):
                     for ii in range(noff):
                         for iv in range(nlambda):
-                            W = np.exp(-Gam[i, ii, lrec_a, iv] * ddu)
+                            G_lr = Gam[i, ii, lrec_a, iv]
+                            W = np.exp(-G_lr * ddu)
                             Wu[i, ii, iv] = W
                             for k in range(nlayer_res):
+                                # eta: -ddu*jac_Gam*W;  depth: -G*W*jac_ddu[k]
                                 jac_Wu[i, ii, iv, k] = (
-                                    -ddu * jac_Gam[i, ii, lrec_a, iv, k] * W)
+                                    -ddu * jac_Gam[i, ii, lrec_a, iv, k] * W
+                                    -G_lr * W * jac_ddu[k])
 
             if lrec_a != 0:
                 ddd = zrec_a - depth[lrec_a]
                 for i in nb.prange(nfreq):
                     for ii in range(noff):
                         for iv in range(nlambda):
-                            W = np.exp(-Gam[i, ii, lrec_a, iv] * ddd)
+                            G_lr = Gam[i, ii, lrec_a, iv]
+                            W = np.exp(-G_lr * ddd)
                             Wd[i, ii, iv] = W
                             for k in range(nlayer_res):
+                                # eta: -ddd*jac_Gam*W;  depth: -G*W*jac_ddd[k]
                                 jac_Wd[i, ii, iv, k] = (
-                                    -ddd * jac_Gam[i, ii, lrec_a, iv, k] * W)
+                                    -ddd * jac_Gam[i, ii, lrec_a, iv, k] * W
+                                    -G_lr * W * jac_ddd[k])
 
             Pu, Pd, jac_Pu, jac_Pd = _fields_jac(
                 depth, Rp, Rm, Gam, lrec_a, lsrc_a, zsrc_a, ab, TM,
-                jac_Rp, jac_Rm, jac_Gam)
+                jac_Rp, jac_Rm, jac_Gam, jac_dists)
 
         # --- Compute green directly into pre_g / pre_jg ---
 
@@ -624,7 +664,8 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                 for i in nb.prange(nfreq):
                     for ii in range(noff):
                         for iv in range(nlambda):
-                            fexp_v = np.exp(-Gam[i, ii, lrec_a, iv] * ddepth_f)
+                            G_lr   = Gam[i, ii, lrec_a, iv]
+                            fexp_v = np.exp(-G_lr * ddepth_f)
                             Rm0_v  = Rm[i, ii, 0, iv]
                             Wu_v   = Wu[i, ii, iv]
                             Wd_v   = Wd[i, ii, iv]
@@ -632,9 +673,12 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                             A_v    = Wu_v + pmw * Rm0_v * fexp_v * Wd_v
                             pre_g[i, ii, iv] = Pu_v * A_v
                             for k in range(nlayer_res):
+                                # eta: -ddepth_f*jac_Gam*fexp
+                                # depth: -G*fexp*d(ddepth_f)/dk = -G*fexp*(jddu+jddd)
                                 jfexp_k = (-ddepth_f
                                            * jac_Gam[i, ii, lrec_a, iv, k]
-                                           * fexp_v)
+                                           * fexp_v
+                                           -G_lr * fexp_v * (jac_ddu[k] + jac_ddd[k]))
                                 jRm0_k  = jac_Rm[i, ii, 0, iv, k]
                                 jA_k = (
                                     jac_Wu[i, ii, iv, k]
@@ -654,7 +698,8 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                 for i in nb.prange(nfreq):
                     for ii in range(noff):
                         for iv in range(nlambda):
-                            fexp_v   = np.exp(-Gam[i, ii, lrec_a, iv] * ddepth_f)
+                            G_lr     = Gam[i, ii, lrec_a, iv]
+                            fexp_v   = np.exp(-G_lr * ddepth_f)
                             Rp_idx_v = Rp[i, ii, idx, iv]
                             Wu_v     = Wu[i, ii, iv]
                             Wd_v     = Wd[i, ii, iv]
@@ -664,7 +709,8 @@ def _greenfct_jac(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                             for k in range(nlayer_res):
                                 jfexp_k  = (-ddepth_f
                                             * jac_Gam[i, ii, lrec_a, iv, k]
-                                            * fexp_v)
+                                            * fexp_v
+                                            -G_lr * fexp_v * (jac_ddu[k] + jac_ddd[k]))
                                 jRp_idx_k = jac_Rp[i, ii, idx, iv, k]
                                 jB_k = (
                                     pmw * jac_Wd[i, ii, iv, k]
@@ -1192,7 +1238,8 @@ def _greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
 
     return GTM, GTE, jac_GTM, jac_GTE
 
-def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None):
+def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None,
+                jac_depth_lower=None):
     r"""Reflection coefficients and optionally their Jacobian w.r.t. horizontal resistivity.
 
     Parameters
@@ -1222,21 +1269,33 @@ def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None):
     # Jacobian path: JIT-compiled single pass over all layers.
     # Cast lrec/lsrc to plain Python ints — they arrive as 0-d numpy arrays
     # from get_layer_nr(), which Numba cannot unify across conditional branches.
+    nfreq, noff, nlayer, nlambda = Gam.shape
+    nlayer_res = jac_e_zH.shape[2]
+    if jac_depth_lower is None:
+        jac_depth_lower = np.zeros((nlayer - 1, nlayer_res))
     return _reflections_jac(depth, e_zH, Gam, int(lrec), int(lsrc),
-                            jac_e_zH, jac_Gam)
+                            jac_e_zH, jac_Gam, jac_depth_lower)
 
 @nb.njit(**_NB_PAR)
-def _reflections_jac(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam):
+def _reflections_jac(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
+                     jac_depth_lower):
     """JIT-compiled reflection coefficients and their Jacobian.
 
     Computes primal ``(Rp, Rm)`` and Jacobian ``(jRp, jRm)`` w.r.t. the
     ``nlayer_res`` parameters encoded in ``jac_e_zH`` / ``jac_Gam``.
 
+    jac_depth_lower : float64 ndarray, shape (nlayer-1, nlayer_res)
+        d(depth_user[n])/d(param_k).  For 'depth' params this is the identity;
+        for eta-only callers pass np.zeros((nlayer-1, nlayer_res)).
+        Depth contributes to the phase factor X_n = R^- * exp(-2*Gam*d)
+        via d(thickness_n)/d(param_k) = jac_depth_lower[n,k] - jac_depth_lower[n-1,k].
+
     Uses explicit scalar loops (Numba-friendly) instead of numpy broadcasting
     with a 5th parameter axis, which eliminates per-layer temporary allocation.
     """
     nfreq, noff, nlayer, nlambda = Gam.shape
-    nlayer_res = jac_e_zH.shape[2]
+    nlayer_res  = jac_e_zH.shape[2]
+    n_interfaces = nlayer - 1          # number of free depth parameters (rows of jac_depth_lower)
     maxl = lrec if lrec > lsrc else lsrc
     minl = lrec if lrec < lsrc else lsrc
     out_len = maxl - minl + 1
@@ -1319,12 +1378,20 @@ def _reflections_jac(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam):
                             G2       = 1.0 + rloc * term
                             tRef[i, ii, iv] = (rloc + term) / G2
                             for k in range(nlayer_res):
-                                # d(X_n)/d(Gam_{n+1}) = -2*d_{n+1}*X_n       d45(4.16)
+                                # d(X_n)/d(Gam_{n+1}) = -2*d_{n+1}*X_n         d45(4.16)
+                                # d(X_n)/d(depth_k) via d(d_{n+1})/d(depth_k):
+                                #   = jac_depth_lower[iz_pm,k] - jac_depth_lower[iz_pm-1,k]
+                                jdepth_k = 0.0
+                                if iz_pm < n_interfaces:
+                                    jdepth_k += jac_depth_lower[iz_pm, k]
+                                if iz_pm > 0:
+                                    jdepth_k -= jac_depth_lower[iz_pm - 1, k]
                                 jE    = (-2.0 * ddepth
-                                         * jac_Gam[i, ii, iz_pm, iv, k] * E_val)
+                                         * jac_Gam[i, ii, iz_pm, iv, k] * E_val
+                                         -2.0 * G_izpm * E_val * jdepth_k)
                                 jterm = jtRef[i, ii, iv, k] * E_val + tRef_old * jE
-                                # d(R^-_n)/d(r_n) = (1-X^2)/(1+r*X)^2        d45(4.6)
-                                # d(R^-_n)/d(X_n) = (1-r^2)/(1+r*X)^2        d45(4.9)
+                                # d(R^-_n)/d(r_n) = (1-X^2)/(1+r*X)^2          d45(4.6)
+                                # d(R^-_n)/d(X_n) = (1-r^2)/(1+r*X)^2          d45(4.9)
                                 jtRef[i, ii, iv, k] = (
                                     (1.0 - term ** 2) * jrloc[i, ii, iv, k]
                                     + (1.0 - rloc ** 2) * jterm
@@ -1482,7 +1549,7 @@ def _reflections_numpy(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None, jac_Gam=None
     return Rp, Rm
 
 def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
-               jac_Rp=None, jac_Rm=None, jac_Gam=None):
+               jac_Rp=None, jac_Rm=None, jac_Gam=None, jac_dists=None):
     r"""Field propagators (Pu, Pd) and optionally their Jacobian w.r.t. horizontal resistivity.
 
     Parameters
@@ -1508,16 +1575,24 @@ def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
     """
     if jac_Rp is None:
         return _empymod_kernel.fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM)
+    nfreq, noff, nlayer, nlambda = Gam.shape
+    nlayer_res = jac_Gam.shape[4]
+    if jac_dists is None:
+        jac_dists = np.zeros((3, nlayer_res))
     return _fields_jac(depth, Rp, Rm, Gam, int(lrec), int(lsrc), zsrc, ab, TM,
-                       jac_Rp, jac_Rm, jac_Gam)
+                       jac_Rp, jac_Rm, jac_Gam, jac_dists)
 
 @nb.njit(**_NB)
 def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
-                jac_Rp, jac_Rm, jac_Gam):
+                jac_Rp, jac_Rm, jac_Gam, jac_dists):
     """JIT-compiled field propagators and their Jacobian.
 
     Mirrors the numpy ``fields`` logic with explicit scalar loops over
     nlayer_res, avoiding [:,:,:,np.newaxis] broadcast temporaries.
+
+    jac_dists : float64 ndarray, shape (3, nlayer_res)
+        d(dp)/d(param_k), d(dm)/d(param_k), d(ds)/d(param_k) stacked in rows.
+        Pass np.zeros((3, nlayer_res)) for eta-only callers.
     """
     nfreq, noff, nlayer, nlambda = Gam.shape
     nlayer_res = jac_Gam.shape[4]
@@ -1606,7 +1681,9 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             R0_v   = Rmp[i, ii, 0, iv]
                             P[i, ii, iv] = R0_v * e_dm_v
                             for k in range(nlayer_res):
-                                je_dm = -dm * jac_Gam[i, ii, lsrc, iv, k] * e_dm_v
+                                # eta contrib: -dm*jG*e_dm;  depth contrib: -iG*e_dm*jdm
+                                je_dm = (-dm * jac_Gam[i, ii, lsrc, iv, k] * e_dm_v
+                                         -iG * e_dm_v * jac_dists[1, k])
                                 jP[i, ii, iv, k] = (
                                     jac_Rmp[i, ii, 0, iv, k] * e_dm_v
                                     + R0_v * je_dm
@@ -1631,9 +1708,14 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             P[i, ii, iv] = num_v / p3_v
                             for k in range(nlayer_res):
                                 jG = jac_Gam[i, ii, lsrc, iv, k]
-                                je_dm_k   = -dm       * jG * e_dm_v
-                                je_dsdp_k = -(ds + dp)* jG * e_dsdp_v
-                                je_2ds_k  = -2.0 * ds * jG * e_2ds_v
+                                # iG = Gam[i, ii, lsrc, iv] — already in scope from outer loop
+                                # eta contrib + depth contrib [d(e)/d(dist) = -iG*e*jdist]
+                                je_dm_k   = (-dm       * jG * e_dm_v
+                                             -iG * e_dm_v * jac_dists[1, k])
+                                je_dsdp_k = (-(ds + dp)* jG * e_dsdp_v
+                                             -iG * e_dsdp_v * (jac_dists[2, k] + jac_dists[0, k]))
+                                je_2ds_k  = (-2.0 * ds * jG * e_2ds_v
+                                             -2.0 * iG * e_2ds_v * jac_dists[2, k])
                                 jR0_k     = jac_Rmp[i, ii, 0, iv, k]
                                 jRpm0_k   = jac_Rpm[i, ii, 0, iv, k]
                                 jp2 = pm * (jRpm0_k * e_dsdp_v + Rpm0_v * je_dsdp_k)
@@ -1661,7 +1743,8 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             P[i, ii, iv] = (1.0 + Rr_v) * mupm * e_dp_v
                             for k in range(nlayer_res):
                                 jG_k   = jac_Gam[i, ii, lsrc, iv, k]
-                                je_dp  = -dp * jG_k * e_dp_v
+                                je_dp  = (-dp * jG_k * e_dp_v
+                                          -iG * e_dp_v * jac_dists[0, k])
                                 jRr_k  = jac_Rpm[i, ii, rsrcl, iv, k]
                                 jP[i, ii, iv, k] = mupm * (
                                     jRr_k * e_dp_v + (1.0 + Rr_v) * je_dp
@@ -1688,9 +1771,13 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             P[i, ii, iv] = (p1_v + p2_v) * (num3_v / den3_v)
                             for k in range(nlayer_res):
                                 jG = jac_Gam[i, ii, lsrc, iv, k]
-                                je_dp_k   = -dp        * jG * e_dp_v
-                                je_dsdm_k = -(ds + dm) * jG * e_dsdm_v
-                                je_2ds_k  = -2.0 * ds  * jG * e_2ds_v
+                                # eta contrib + depth contrib [d(e)/d(dist) = -iG*e*jdist]
+                                je_dp_k   = (-dp        * jG * e_dp_v
+                                             -iG * e_dp_v * jac_dists[0, k])
+                                je_dsdm_k = (-(ds + dm) * jG * e_dsdm_v
+                                             -iG * e_dsdm_v * (jac_dists[2, k] + jac_dists[1, k]))
+                                je_2ds_k  = (-2.0 * ds  * jG * e_2ds_v
+                                             -2.0 * iG * e_2ds_v * jac_dists[2, k])
                                 jRpm_r_k  = jac_Rpm[i, ii, rsrcl, iv, k]
                                 jRmp_r_k  = jac_Rmp[i, ii, rsrcl, iv, k]
                                 jp1 = mupm * je_dp_k
