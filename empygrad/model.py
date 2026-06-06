@@ -933,7 +933,9 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         - ``'depth'`` : ``d(EM)/d(depth[k])``, shape ``(nfreq, nrec, n_interfaces)``
           where ``n_interfaces = len(depth)``; requires ``signal=None``, ``ht='dlf'``.
         - ``'thickness'`` : not yet implemented.
-        - ``'src_x'``, ``'src_y'``, ``'src_z'`` : not yet implemented.
+        - ``'src_z'`` : ``d(EM)/d(z_src)``, shape ``(nfreq, nrec, 1)``.
+          Not supported for ME mode (magnetic receiver, electric source).
+        - ``'src_x'``, ``'src_y'`` : not yet implemented.
 
         If *jac* is a single string, the Jacobian is returned as an ndarray.
         If *jac* is a list, a ``dict {param: ndarray}`` is returned.
@@ -1103,11 +1105,12 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
             f"Unknown Jacobian parameter(s): {sorted(unknown)}. "
             f"Supported: {sorted(_ALL_JAC_PARAMS)}.")
 
-    src_pos_params = [p for p in jac_params if p in _SRC_POS_PARAMS]
-    if src_pos_params:
+    src_horiz_params = [p for p in jac_params if p in {'src_x', 'src_y'}]
+    if src_horiz_params:
         raise NotImplementedError(
-            f"Jacobian w.r.t. source-position parameters {src_pos_params} "
-            "is not yet implemented.")
+            f"Jacobian w.r.t. {src_horiz_params} is not yet implemented.")
+
+    has_src_z = 'src_z' in jac_params
 
     eta_params   = [p for p in jac_params if p in _ETA_TYPE_PARAMS]
     depth_params = [p for p in jac_params if p in _GEO_DEPTH_PARAMS]
@@ -1158,18 +1161,40 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         jac_etaV_in = jac_etaV_eta
         jac_dlo_in  = np.zeros((n_interfaces, n_eta))
         all_slices  = eta_slices
-    else:  # depth only
+    else:  # depth only (or no params yet)
         jac_etaH_in = np.zeros((freq.size, etaH.shape[1], n_depth),
                                dtype=etaH.dtype)
         jac_etaV_in = np.zeros_like(jac_etaH_in)
         jac_dlo_in  = jac_depth_lower
-        all_slices  = depth_slices
+        all_slices  = dict(depth_slices)
+
+    # --- Augment with src_z column (zero eta/depth seeds, special jac_dists) ---
+    if has_src_z:
+        if mrec and not msrc:
+            raise NotImplementedError(
+                "Jacobian w.r.t. 'src_z' is not yet implemented for ME mode "
+                "(mrec=True, msrc=False).  Use ab values with electric receivers.")
+        src_z_col_idx = n_params   # appended after eta+depth cols
+        zeros_sz = np.zeros((freq.size, etaH.shape[1], 1), dtype=etaH.dtype)
+        jac_etaH_in = np.concatenate([jac_etaH_in, zeros_sz], axis=2)
+        jac_etaV_in = np.concatenate([jac_etaV_in, zeros_sz], axis=2)
+        jac_dlo_in  = np.concatenate([jac_dlo_in,
+                                      np.zeros((n_interfaces, 1))], axis=1)
+        all_slices['src_z'] = slice(src_z_col_idx, src_z_col_idx + 1)
+        n_params += 1
+    else:
+        src_z_col_idx = -1
+
+    # src_z indicator vector: 1.0 at the src_z column, 0.0 elsewhere
+    jac_src_z_indicator = np.zeros(n_params)
+    if has_src_z:
+        jac_src_z_indicator[src_z_col_idx] = 1.0
 
     # Single kernel pass with all seed columns stacked.
     _PJ0, _PJ1, _PJ0b, jac_PJ0, jac_PJ1, jac_PJ0b = kernel.wavenumber(
         zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         lambd, ab_calc, xdirect, msrc, mrec, jac_etaH_in, jac_etaV_in,
-        jac_dlo_in)
+        jac_dlo_in, jac_src_z_indicator, src_z_col_idx)
 
     # DLF transform is linear — apply column-by-column over n_params.
     jac_EM = np.zeros((freq.size, off.size, n_params), dtype=etaH.dtype)
