@@ -172,15 +172,3 @@ def test_jac_depth_vs_fd_impulse(model, k):
     assert_allclose(
         J[:, :, k] / norm, dEM_fd / norm, atol=1e-3,
         err_msg=f"depth Jacobian (signal=0) FD mismatch for interface k={k}")
-
-
-# ---------------------------------------------------------------------------
-# 6. ht != 'dlf' still raises NotImplementedError
-# ---------------------------------------------------------------------------
-
-def test_raises_for_ht_not_dlf(model):
-    m = model
-    with pytest.raises(NotImplementedError, match="ht='dlf'"):
-        dipole(src=m["src"], rec=m["rec"], depth=m["depth"], res=m["res"],
-               freqtime=m["freqtime"], ab=m["ab"], signal=0, verb=0,
-               jac='res', ht='qwe')

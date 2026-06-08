@@ -385,14 +385,6 @@ def test_jac_res_vs_fd_ab66_aniso(model_ab66_aniso, k):
 # 8. NotImplementedError guards
 # ---------------------------------------------------------------------------
 
-def test_raises_for_time_domain(model):
-    m = model
-    with pytest.raises(NotImplementedError, match="signal=None"):
-        dipole(src=m["src"], rec=m["rec"], depth=m["depth"], res=m["res"],
-               freqtime=[0.01, 0.1], ab=m["ab"], verb=0,
-               signal=0, jac='res')
-
-
 def test_raises_for_unknown_param(model):
     m = model
     with pytest.raises(ValueError, match="Unknown Jacobian parameter"):

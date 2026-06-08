@@ -5,7 +5,8 @@ import subprocess
 import numpy as np
 from numpy.testing import assert_allclose
 
-from empygrad import utils, filters
+from empygrad import utils
+from empymod import filters
 
 
 def test_emarray():
@@ -1282,23 +1283,30 @@ def test_check_min(capsys):
 
 def test_minimum():
     # Check default values
-    d = utils.get_minimum()
-    assert d['min_freq'] == 1e-20
-    assert d['min_time'] == 1e-20
-    assert d['min_off'] == 1e-3
-    assert d['min_res'] == 1e-20
-    assert d['min_angle'] == 1e-10
+    defaults = utils.get_minimum()
+    assert defaults['min_freq'] == 1e-20
+    assert defaults['min_time'] == 1e-20
+    assert defaults['min_off'] == 1e-3
+    assert defaults['min_res'] == 1e-20
+    assert defaults['min_angle'] == 1e-10
 
-    # Set all default values to new values
-    utils.set_minimum(1e-2, 1e-3, 1, 1e-4, 1e-5)
+    try:
+        # Set all default values to new values
+        utils.set_minimum(1e-2, 1e-3, 1, 1e-4, 1e-5)
 
-    # Check new values
-    d = utils.get_minimum()
-    assert d['min_freq'] == 1e-2
-    assert d['min_time'] == 1e-3
-    assert d['min_off'] == 1
-    assert d['min_res'] == 1e-4
-    assert d['min_angle'] == 1e-5
+        # Check new values
+        d = utils.get_minimum()
+        assert d['min_freq'] == 1e-2
+        assert d['min_time'] == 1e-3
+        assert d['min_off'] == 1
+        assert d['min_res'] == 1e-4
+        assert d['min_angle'] == 1e-5
+    finally:
+        # Restore the global defaults so this module-level state does not
+        # leak into later tests (e.g. test_vs_empymod near-zero comparisons).
+        utils.set_minimum(defaults['min_freq'], defaults['min_time'],
+                          defaults['min_off'], defaults['min_res'],
+                          defaults['min_angle'])
 
 
 def test_report(capsys):

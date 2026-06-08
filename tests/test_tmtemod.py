@@ -4,7 +4,8 @@ from numpy.testing import assert_allclose
 from scipy.constants import mu_0, epsilon_0
 
 from empygrad.scripts import tmtemod
-from empygrad import kernel, filters, dipole
+from empygrad import kernel, dipole
+from empymod import filters
 
 # We only check that the summed return values in the functions in tmtemod agree
 # with the corresponding functions from empygrad. Nothing more. The examples are
