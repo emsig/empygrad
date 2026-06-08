@@ -1748,6 +1748,19 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
 
         ds = ds_init
 
+        # The up pass swaps the primal distances dp<->dm (above); swap their
+        # Jacobian seed rows to match so the distance-derivative terms below use
+        # the correct d(dp)/d(param), d(dm)/d(param).  jac_dists[2] (d ds) is
+        # symmetric under the swap.  (For res/aniso all rows are zero, so this is
+        # only observable for depth / src_z / rec_z parameters.)
+        if up:
+            j_dp = jac_dists[1]
+            j_dm = jac_dists[0]
+        else:
+            j_dp = jac_dists[0]
+            j_dm = jac_dists[1]
+        j_ds = jac_dists[2]
+
         P  = np.zeros((nfreq, noff, nlambda), dtype=Gam.dtype)
         jP = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=Gam.dtype)
 
@@ -1765,7 +1778,7 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             for k in range(nlayer_res):
                                 # eta contrib: -dm*jG*e_dm;  depth contrib: -iG*e_dm*jdm
                                 je_dm = (-dm * jac_Gam[i, ii, lsrc, iv, k] * e_dm_v
-                                         -iG * e_dm_v * jac_dists[1, k])
+                                         -iG * e_dm_v * j_dm[k])
                                 jP[i, ii, iv, k] = (
                                     jac_Rmp[i, ii, 0, iv, k] * e_dm_v
                                     + R0_v * je_dm
@@ -1793,11 +1806,11 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                                 # iG = Gam[i, ii, lsrc, iv] — already in scope from outer loop
                                 # eta contrib + depth contrib [d(e)/d(dist) = -iG*e*jdist]
                                 je_dm_k   = (-dm       * jG * e_dm_v
-                                             -iG * e_dm_v * jac_dists[1, k])
+                                             -iG * e_dm_v * j_dm[k])
                                 je_dsdp_k = (-(ds + dp)* jG * e_dsdp_v
-                                             -iG * e_dsdp_v * (jac_dists[2, k] + jac_dists[0, k]))
+                                             -iG * e_dsdp_v * (j_ds[k] + j_dp[k]))
                                 je_2ds_k  = (-2.0 * ds * jG * e_2ds_v
-                                             -2.0 * iG * e_2ds_v * jac_dists[2, k])
+                                             -2.0 * iG * e_2ds_v * j_ds[k])
                                 jR0_k     = jac_Rmp[i, ii, 0, iv, k]
                                 jRpm0_k   = jac_Rpm[i, ii, 0, iv, k]
                                 jp2 = pm * (jRpm0_k * e_dsdp_v + Rpm0_v * je_dsdp_k)
@@ -1826,7 +1839,7 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                             for k in range(nlayer_res):
                                 jG_k   = jac_Gam[i, ii, lsrc, iv, k]
                                 je_dp  = (-dp * jG_k * e_dp_v
-                                          -iG * e_dp_v * jac_dists[0, k])
+                                          -iG * e_dp_v * j_dp[k])
                                 jRr_k  = jac_Rpm[i, ii, rsrcl, iv, k]
                                 jP[i, ii, iv, k] = mupm * (
                                     jRr_k * e_dp_v + (1.0 + Rr_v) * je_dp
@@ -1855,11 +1868,11 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                                 jG = jac_Gam[i, ii, lsrc, iv, k]
                                 # eta contrib + depth contrib [d(e)/d(dist) = -iG*e*jdist]
                                 je_dp_k   = (-dp        * jG * e_dp_v
-                                             -iG * e_dp_v * jac_dists[0, k])
+                                             -iG * e_dp_v * j_dp[k])
                                 je_dsdm_k = (-(ds + dm) * jG * e_dsdm_v
-                                             -iG * e_dsdm_v * (jac_dists[2, k] + jac_dists[1, k]))
+                                             -iG * e_dsdm_v * (j_ds[k] + j_dm[k]))
                                 je_2ds_k  = (-2.0 * ds  * jG * e_2ds_v
-                                             -2.0 * iG * e_2ds_v * jac_dists[2, k])
+                                             -2.0 * iG * e_2ds_v * j_ds[k])
                                 jRpm_r_k  = jac_Rpm[i, ii, rsrcl, iv, k]
                                 jRmp_r_k  = jac_Rmp[i, ii, rsrcl, iv, k]
                                 jp1 = mupm * je_dp_k
