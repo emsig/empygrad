@@ -136,13 +136,23 @@ def test_jac_mpermV_vs_fd(model, k):
 
 
 # ---------------------------------------------------------------------------
-# 5. mpermH on a magnetic-dipole config (ab=66 is MM -> guarded; use ab=46)
-#    ab=46: electric x-receiver, magnetic z-source (EM mode, not MM)
+# 5. mpermH on a magnetic-dipole config.
+#    NOTE: ab=46 is magnetic-source (4) AND magnetic-receiver (6) -> MM mode.
+#    (The original "electric receiver, not MM" note mis-read the ab digit
+#    convention.) The mperm Jacobian for MM mode is deliberately not
+#    implemented -- model.py raises NotImplementedError -- so this is xfail
+#    until the eta<->zeta duality seeds are added. Non-MM mperm coverage lives
+#    in test_jac_mpermH_vs_fd / test_jac_mpermV_vs_fd above.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(
+    reason="MM-mode (ab=46) mperm Jacobian not implemented; model.py raises "
+           "NotImplementedError for magnetic source AND magnetic receiver",
+    raises=NotImplementedError, strict=True)
 @pytest.mark.parametrize("k", [1, 2])
 def test_jac_mpermH_vs_fd_ab46(model, k):
-    """ab=46 exercises a magnetic source with electric receiver (not MM)."""
+    """ab=46 is MM mode (magnetic source AND magnetic receiver); the MM-mode
+    mperm Jacobian is not yet implemented, so this is expected to fail."""
     m = model
     h = 1e-5
 
