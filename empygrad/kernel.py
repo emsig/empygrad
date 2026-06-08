@@ -1489,7 +1489,7 @@ def _reflections_jac(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
                 izout -= pm
 
         # lsrc == lrec: final tRef goes into slot 0
-        if lsrc == lrec:
+        if lsrc == lrec and len(layer_count) > 0:
             for i in nb.prange(nfreq):
                 for ii in range(noff):
                     for iv in range(nlambda):
@@ -1868,7 +1868,7 @@ def _fields_jac(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                                 )
                                 jnum3 = jRpm_r_k
                                 jden3 = -(
-                                    (jRmp_r_k * Rmp_r_v + Rpm_r_v * jRmp_r_k) * e_2ds_v
+                                    (jRmp_r_k * Rpm_r_v + Rmp_r_v * jRpm_r_k) * e_2ds_v
                                     + Rmp_r_v * Rpm_r_v * je_2ds_k
                                 )
                                 jp3 = (
