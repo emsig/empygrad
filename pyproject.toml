@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=2.0.0",
     "scipy",
     "numba",
+    "empymod>=2.2.0",
     "libdlf",
     "scooby",
 ]
