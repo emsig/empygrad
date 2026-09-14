@@ -22,6 +22,7 @@ var/
 wheels/
 share/python-wheels/
 *.egg-info/
+empygrad/version.py
 .installed.cfg
 *.egg
 MANIFEST
@@ -216,3 +217,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+/.idea
