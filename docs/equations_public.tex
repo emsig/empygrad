@@ -1,0 +1,1188 @@
+\documentclass[12pt]{report}
+%\usepackage{helvet} 
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{tgheros} 
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsfonts,mathtools}
+\usepackage{bm}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{fancybox}
+
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+
+% ---- Partial-derivative shorthand ----
+\newcommand{\pds}[1]{\partial_{\sigma_{#1}}}   % d/d(sigma_n)
+
+% ---- Vector/tensor and misc convenience ----
+\newcommand{\vect}[1]{\mathbf{#1}}
+
+% ---- Code-facing typography ----
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\jacparam}[1]{\code{#1}}
+
+\title{\textbf{Analytical Resistivity Jacobian\\
+       for a 1D Layered VTI Electromagnetic Medium\\}
+       \large Public Version}
+\author{Wouter Deleersnyder}
+\date{\today}
+
+
+\setlength{\parindent}{0pt}
+
+\begin{document}
+%\maketitle
+
+\thispagestyle{empty}
+
+\vspace*{3cm}
+
+{\centering
+	\fbox{
+		\begin{minipage}{0.9\textwidth}
+			\centering
+			\vspace{0.5cm}
+			{\huge \textbf{Analytical Resistivity Jacobian\\
+					for a 1D Layered VTI Electromagnetic Medium}}
+			\vspace{0.3cm}
+			
+			%{\large Subtitle goes here}
+			\vspace{0.5cm}
+		\end{minipage}
+	}
+	
+	\vspace{2cm}
+	
+	{\large Wouter Deleersnyder}
+	
+	\vspace{0.5cm}
+	
+	Public Version
+	
+	\vspace{0.5cm}
+	
+	{\normalsize \today}
+	
+	\par}
+
+
+	\vspace{5.5cm}
+This document presents the full analytical derivation of the Jacobian for resistivity. Derivations for the remaining model parameters are intentionally not included here and are not planned for public release. This material is shared only upon individual request, in order to retain some control over how and by whom it is used.\\
+
+If you are interested in the derivations for the other parameters, or in discussing potential applications, extensions, or collaboration, please feel free to reach out to me at\\ \url{www.wouterdeleersnyder.be}
+
+
+\vspace*{\fill}
+
+\newpage
+
+\tableofcontents
+
+\chapter{Introduction}
+\section{Scope and how to read this document}
+
+
+The electromagnetic field radiated by a dipole source in horizontally layered, homogeneous media can be expressed in the wavenumber domain, following a Hankel transform, in terms of up- and down-going TM- and TE-mode reflection coefficients and a small set of source-layer propagation factors. Differentiating this closed-form expression with respect to the conductivity of a given layer yields the conductivity sensitivity analytically, eliminating the need for finite-difference perturbations of the forward model.\\
+
+\Cref{sec:model} establishes the notation and presents the constitutive relations linking conductivity to the two complex per-layer quantities—admittivity and impedivity—used by the forward model. \Cref{sec:tmte} introduces the reflection-coefficient and propagator framework before differentiation, which is then developed analytically in \Cref{sec:res}. The main result, presented in \Cref{sec:res}, is the resistivity Jacobian. \Cref{app:notation} provides a consolidated reference for the notation and symbols used throughout.\\
+
+\emph{Sign convention:} \(e^{+i\omega t}\) is used throughout, so that \(s := i\omega\) with \(\omega = 2\pi f\) the angular frequency.
+
+% ==============================================================
+\section{Layered VTI model and constitutive relations}
+\label{sec:model}
+% ==============================================================
+
+\subsection{Geometry}
+
+The subsurface is represented by \(N\) horizontal, homogeneous VTI
+(vertical transverse isotropic) layers separated by planar interfaces at
+\(z_1 < z_2 < \dots < z_{N-1}\). The upper and lower half-spaces are
+defined by \(z_0=-\infty\) and \(z_N=+\infty\), respectively. Layer \(n\)
+extends over \(z_{n-1}<z<z_n\) and, for an interior layer, has thickness
+\(d_n=z_n-z_{n-1}\). The source is located at depth
+\(z_0^{\mathrm{src}}\) in layer \(s\), while the receiver is positioned at
+depth \(z\). 
+
+\subsection{Constitutive parameters}
+\label{sec:constitutive}
+
+Each layer \(n\) is described by real, frequency-independent material
+properties: the horizontal and vertical resistivities
+\(\rho_n,\rho_n^v\) (equivalently the conductivities), the horizontal and
+vertical relative electric permittivities
+\(\varepsilon_n,\varepsilon_n^v\), and the horizontal and vertical relative
+magnetic permeabilities \(\mu_n,\mu_n^v\). From these quantities, four
+complex frequency-dependent \emph{admittivity}/\emph{impedivity}
+parameters are defined, with \(s:=i\omega\):
+\begin{align}
+    \eta_n   &= \sigma_n + s\,\varepsilon_n
+             = \frac{1}{\rho_n} + i\omega\varepsilon_0\,\varepsilon_n,
+             &\eta^v_n  &= \sigma^v_n + s\,\varepsilon^v_n
+             = \frac{1}{\rho_n\,\lambda_n^2} + i\omega\varepsilon_0\,\varepsilon^v_n,
+    \label{eq:eta-def} \\
+    \zeta_n  &= s\mu_n = i\omega\mu_0\,\mu_n,
+             &\zeta^v_n &= s\mu^v_n = i\omega\mu_0\,\mu^v_n,
+    \label{eq:zeta-def}
+\end{align}
+Here \(\lambda_n=\sigma_n/\sigma_n^v=\sqrt{\rho_n^v/\rho_n}\geq1\)
+denotes the dimensionless \emph{anisotropy factor};
+\(\varepsilon_0\) and \(\mu_0\) are the vacuum permittivity and
+permeability. The quantities \(\eta_n,\eta_n^v\) are referred to as
+\emph{admittivities} and govern the electric response, whereas
+\(\zeta_n,\zeta_n^v\) are \emph{impedivities} associated with the magnetic
+response. Together they form the \emph{eta/zeta seeds} from which the
+forward model and its derivatives are constructed. For the conductivity
+derivatives in \Cref{sec:res}, only
+\(\partial\eta_n/\partial\sigma_n=1\) and
+\(\partial\eta_n^v/\partial\sigma_n^v=1\) are required, with the remaining
+constitutive parameters kept fixed.
+
+\subsection{TM/TE propagation constants}
+\label{sec:propagation-constants}
+
+For a planar layered medium, Maxwell's equations can be separated into
+transverse-magnetic (TM) and transverse-electric (TE) modes. The TM mode
+is associated with the vertical electric field, whereas the TE mode is
+associated with the vertical magnetic field. Using the horizontal
+wavenumber \(\kappa\) as the Hankel-transform integration variable, define
+\begin{align}
+    \gamma_n  &= \sqrt{\zeta_n\,\eta^v_n\vphantom{)}}\,, &
+    \bar\gamma_n &= \sqrt{\eta_n\,\zeta^v_n\vphantom{)}}\,,
+    \label{eq:gamma-def}\\
+    \Gamma_n &= \left(\frac{\eta_n}{\eta^v_n}\right)^{1/2}
+                \left(\kappa^2+\gamma_n^2\right)^{1/2},
+             &
+    \bar\Gamma_n &= \left(\frac{\zeta_n}{\zeta^v_n}\right)^{1/2}
+                \left(\kappa^2+\bar\gamma_n^2\right)^{1/2}.
+    \label{eq:Gamma-def}
+\end{align}
+\(\Gamma_n\) and \(\bar\Gamma_n\) are the TM and TE propagation
+constants, respectively. In the isotropic limit,
+\(\eta_n=\eta_n^v\) and \(\zeta_n=\zeta_n^v\), both reduce to the standard
+diffusion expression \(\sqrt{\kappa^2+s\mu_n\eta_n}\). The two modes,
+however, have different dependencies on the electric properties.
+\(\bar\gamma_n\) contains the horizontal quantity \(\eta_n\) but not
+\(\eta_n^v\), whereas \(\Gamma_n\) depends on both through \(\gamma_n\)
+and the factor \((\eta_n/\eta_n^v)^{1/2}\). Consequently, the TE mode is
+independent of vertical conductivity,
+\(\partial\bar\Gamma_n/\partial\sigma_n^v\equiv0\), as shown in
+\Cref{sec:res}, \eqref{eq:1.21}, while the TM mode remains sensitive to
+both horizontal and vertical properties.
+
+% ==============================================================
+\section{TM/TE decomposition, reflection coefficients, propagators}
+\label{sec:tmte}
+% ==============================================================
+
+This section summarizes the \emph{primal}, non-Jacobian quantities
+that are differentiated in \Cref{sec:res}. These consist of the local and
+global reflection coefficients, the source-layer field propagators, and
+the TM/TE amplitude factors used to assemble the wavenumber-domain
+Green's functions.
+
+\subsection{Local reflection coefficients}
+\label{sec:local-refl-ch3}
+
+At the interface separating layers \(n\) and \(n+1\), the corresponding
+\emph{local} single-interface reflection coefficients for the TE and TM
+modes are
+\begin{equation}
+    r_n^{TE} = \frac{\bar\Gamma_n - \bar\Gamma_{n+1}}{\bar\Gamma_n + \bar\Gamma_{n+1}},
+    \qquad
+    r_n^{TM} = \frac{\eta_{n+1}\Gamma_n - \eta_n\Gamma_{n+1}}
+                    {\eta_{n+1}\Gamma_n + \eta_n\Gamma_{n+1}}.
+    \label{eq:ch3-local-refl}
+\end{equation}
+These expressions follow from enforcing continuity of the tangential
+fields across the interface. The TE coefficient has the usual symmetric
+mismatch form, while the TM coefficient contains the additional
+\(\eta_{n+1}/\eta_n\) weighting because its characteristic impedance
+depends on \(\Gamma_n/\eta_n\) rather than on \(\Gamma_n\) alone.
+
+\subsection{Global reflection coefficients}
+\label{sec:global-refl-ch3}
+
+Multiple reflections within the layered medium are incorporated using
+the standard recursive Bremmer-series formulation. The global reflection
+coefficient \(R_n^{TE,TM}\), evaluated from the top of layer \(n+1\), is
+then given by
+\begin{equation}
+    R_n^{TE,TM} =
+        \frac{r_n^{TE,TM} + R_{n+1}^{TE,TM}\,E_{n+1}}
+             {1 + r_n^{TE,TM}\,R_{n+1}^{TE,TM}\,E_{n+1}},
+    \qquad
+    E_{n+1} = \exp(-2\Gamma_{n+1}^{(\cdot)}\,d_{n+1}),
+    \label{eq:ch3-global-refl}
+\end{equation}
+Here \(\Gamma^{(\cdot)}\) denotes \(\Gamma\) for TM and
+\(\bar\Gamma\) for TE. The recursion starts from the bottom half-space
+with \(R_N=0\) and proceeds upward; the analogous construction is used for
+the opposite propagation direction. Since the contribution of each layer
+contains the exponentially decaying factor \(E_{n+1}\), deeper interfaces
+are increasingly attenuated. This is the physical basis for treating a
+conductivity perturbation as a local modification that is propagated
+outward through a sequence of
+\(\partial R_k/\partial R_{k+1}\) factors
+(\Cref{sec:res}, \eqref{eq:1.27}, \eqref{eq:1.33}).
+
+\subsection{Source-layer field propagators and amplitude factors}
+\label{sec:propagators-ch3}
+
+Inside source layer \(s\), the vertical field dependence is represented
+by two exponential propagators referenced to the receiver depth \(z\) and
+the bounding interfaces \(z_{s-1}\) and \(z_s\):
+\begin{equation}
+    W_s^u = \exp\!\left[-\Gamma_s(z_s - z)\right], \qquad
+    W_s^d = \exp\!\left[-\Gamma_s(z - z_{s-1})\right],
+    \label{eq:ch3-propagators}
+\end{equation}
+The TE propagators \(\bar W_s^{u,d}\) have the same form after replacing
+\(\Gamma_s\) by \(\bar\Gamma_s\). The upward- and downward-going amplitude
+factors combine the source-layer global reflection coefficients
+\(R_s^-\) and \(R_s^+\) with the multiple-reflection denominator
+\begin{equation}
+    M_s = 1 - R_s^-\,R_s^+\,\exp(-2\Gamma_s\,d_s)
+    \label{eq:ch3-Ms}
+\end{equation}
+are
+\begin{align}
+    P_s^{u\pm} &= \frac{R_s^+}{M_s}
+        \left(\exp(-\Gamma_s\,d^+) \pm R_s^-\exp\!\left[-\Gamma_s(d_s+d^-)\right]\right),
+    \label{eq:ch3-Pu}\\
+    P_s^{d\pm} &= \frac{R_s^-}{M_s}
+        \left(\exp(-\Gamma_s\,d^-) \pm R_s^+\exp\!\left[-\Gamma_s(d_s+d^+)\right]\right),
+    \label{eq:ch3-Pd}
+\end{align}
+where \(d^+=z_s-z_0^{\mathrm{src}}\) and
+\(d^-=z_0^{\mathrm{src}}-z_{s-1}\). The corresponding TE factors
+\(\bar P_s^{u\pm},\bar P_s^{d\pm}\) are obtained using
+\(R^\pm\to R^{TE,\pm}\) and \(\Gamma_s\to\bar\Gamma_s\). The TM and TE
+integral kernels entering the wavenumber-domain Green's functions
+(\Cref{sec:res}, \eqref{eq:1.41}, \eqref{eq:1.75}, \eqref{eq:1.84}) are
+assembled from these building blocks:
+\[
+    \tilde g^{TM}_{zh;s} = P_s^{u-}W_s^u - P_s^{d-}W_s^d, \qquad
+    \tilde g^{TM}_{hh;s} = P_s^{u+}W_s^u + P_s^{d+}W_s^d, \qquad
+    \tilde g^{TE}_{zz;s} = \bar P_s^{u+}\bar W_s^u + \bar P_s^{d+}\bar W_s^d.
+\]
+
+% ==============================================================
+\chapter{Gradients with respect to resistivity/conductivity}
+\label{sec:res}
+% ==============================================================
+
+\textbf{Literature.} Streich et al.\ (2011), \emph{Sensitivity of
+controlled-source electromagnetic fields in planarly layered media};
+Patriarca et al.\ (2011), \emph{Gradient based technique for
+electromagnetic layered earth model data inversion}.
+
+\section{Introduction}
+Conductivity is commonly treated as either isotropic or VTI-anisotropic,
+in which case the horizontal and vertical conductivities are different
+(Everett and Constable 1999; Newman et al.\ 2010). As with the EM field
+components themselves, the corresponding derivatives can be written as
+Bessel-function integrals. These integrals can be evaluated efficiently
+with fast Hankel-transform digital filters
+(e.g.\ Johansen and S{\o}rensen 1979; Anderson 1982; Christensen 1990),
+so that the computational effort required for sensitivities remains
+comparable to that of the forward-field calculation.
+
+For a planar layered medium, Maxwell's equations likewise allow the EM
+field to be separated into TE and TM contributions
+(\Cref{sec:tmte}).
+
+\section{EM field derivatives}
+
+For an arbitrary field component \(F\), the sensitivity \(J_n^F\) is
+defined as the derivative with respect to the conductivity of layer \(n\),
+\begin{equation}
+    J^F_n = \frac{\partial F}{\partial \sigma_n}
+    \label{eq:1.1}
+\end{equation}
+Alternatively, derivatives may be taken with respect to \(\ln\sigma\),
+which is useful for imposing bounds while guaranteeing positive
+conductivity values. The derivations below use the constitutive relations
+introduced in \Cref{sec:model}:
+\begin{align}
+    s     &= i\omega                                                              \label{eq:1.2}  \\
+    \zeta &= s\mu                                                                 \label{eq:1.3}  \\
+    \zeta^v &= s\mu^v                                                             \label{eq:1.4}  \\
+    \eta  &= \sigma + s\varepsilon                                                \label{eq:1.5}  \\
+    \eta^v &= \sigma^v + s\varepsilon^v                                           \label{eq:1.6}  \\
+    \gamma  &= \sqrt{\zeta\,\eta^v}                                               \label{eq:1.7}  \\
+    \bar{\gamma} &= \sqrt{\eta\,\zeta^v}                                          \label{eq:1.8}  \\
+    \Gamma  &= \left(\frac{\eta}{\eta^v}\right)^{1/2}\!\left(\kappa^2+\gamma^2\right)^{1/2}
+                                                                                  \label{eq:1.9}  \\
+    \bar{\Gamma} &= \left(\frac{\zeta}{\zeta^v}\right)^{1/2}\!\left(\kappa^2+\bar{\gamma}^2\right)^{1/2}
+                                                                                  \label{eq:1.10}
+\end{align}
+We now derive explicit analytical expressions for the EM-field
+sensitivities in a one-dimensional isotropic or VTI layered medium.
+
+\subsection{Derivatives of the local reflection coefficients}
+\label{sec:local_refl}
+
+The TE- and TM-mode local reflection coefficients are given by
+\begin{equation}
+    r_n^{TE} = \frac{\Gamma_n - \Gamma_{n+1}}{\Gamma_n + \Gamma_{n+1}}
+    \label{eq:1.11}
+\end{equation}
+and
+\begin{equation}
+    r_n^{TM} = \frac{\eta_{n+1}\,\Gamma_n - \eta_n\,\Gamma_{n+1}}
+                    {\eta_{n+1}\,\Gamma_n + \eta_n\,\Gamma_{n+1}}
+    \label{eq:1.12}
+\end{equation}
+Differentiating these expressions gives
+\begin{align}
+    \frac{\partial r_n^{TE}}{\partial \sigma_n}
+    &= \pds{n}\!\left(\frac{\Gamma_n - \Gamma_{n+1}}{\Gamma_n + \Gamma_{n+1}}\right)
+     = \frac{\pds{n}\Gamma_n}{\Gamma_n + \Gamma_{n+1}}
+       + \frac{-(\Gamma_n - \Gamma_{n+1})\,(\pds{n}\Gamma_n)}{(\Gamma_n + \Gamma_{n+1})^2}
+     = \frac{(\pds{n}\Gamma_n)(1 - r_n^{TE})}{\Gamma_n + \Gamma_{n+1}}
+    \label{eq:1.13}
+\end{align}
+and
+\begin{align}
+    \frac{\partial r_n^{TM}}{\partial \sigma_n}
+    &= \frac{\partial r_n^{TM}}{\partial \Gamma_n}\frac{\partial \Gamma_n}{\partial \sigma_n}
+     + \frac{\partial r_n^{TM}}{\partial \eta_n}\frac{\partial \eta_n}{\partial \sigma_n}
+     = \pds{n}\!\left(\frac{\eta_{n+1}\Gamma_n - \eta_n\Gamma_{n+1}}
+                          {\eta_{n+1}\Gamma_n + \eta_n\Gamma_{n+1}}\right) \nonumber \\
+    &= \frac{\eta_{n+1}\,\pds{n}\Gamma_n - \Gamma_{n+1}
+             - (\eta_{n+1}\Gamma_n - \eta_n\Gamma_{n+1})(\eta_{n+1}\,\pds{n}\Gamma_n + \Gamma_{n+1})}
+            {(\eta_{n+1}\Gamma_n + \eta_n\Gamma_{n+1})^2} \nonumber \\
+    &= \frac{\eta_{n+1}(\pds{n}\Gamma_n)(1 - r_n^{TM}) - \Gamma_{n+1}(1 + r_n^{TM})}
+            {\eta_{n+1}\Gamma_n + \eta_n\Gamma_{n+1}}
+    \label{eq:1.14}
+\end{align}
+Because the properties of layer \(n\) also enter the reflection
+coefficient at boundary \(n-1\), the corresponding derivatives are also
+required:
+\begin{align}
+    \frac{\partial r_{n-1}^{TE}}{\partial \sigma_n}
+    &= \pds{n}\!\left(\frac{\Gamma_{n-1} - \Gamma_n}{\Gamma_{n-1} + \Gamma_n}\right)
+     = \frac{-\pds{n}\Gamma_n}{\Gamma_{n-1} + \Gamma_n}
+       + \frac{-(\Gamma_{n-1} - \Gamma_n)\,(\pds{n}\Gamma_n)}{(\Gamma_{n-1} + \Gamma_n)^2}
+     = \frac{-(\pds{n}\Gamma_n)(1 + r_{n-1}^{TE})}{\Gamma_{n-1} + \Gamma_n}
+    \label{eq:1.15}
+\end{align}
+and
+\begin{align}
+    \frac{\partial r_{n-1}^{TM}}{\partial \sigma_n}
+    &= \pds{n}\!\left(\frac{\eta_n\Gamma_{n-1} - \eta_{n-1}\Gamma_n}
+                          {\eta_n\Gamma_{n-1} + \eta_{n-1}\Gamma_n}\right) \nonumber \\
+    &= \frac{\Gamma_{n-1} - \eta_{n-1}(\pds{n}\Gamma_n)
+             - r_{n-1}^{TM}\!\left(\Gamma_{n-1} + \eta_{n-1}(\pds{n}\Gamma_n)\right)}
+            {\eta_n\Gamma_{n-1} + \eta_{n-1}\Gamma_n} \nonumber \\
+    &= \frac{-\eta_{n-1}(\pds{n}\Gamma_n)(1 + r_{n-1}^{TM}) + \Gamma_{n-1}(1 - r_{n-1}^{TM})}
+            {\eta_n\Gamma_{n-1} + \eta_{n-1}\Gamma_n}
+    \label{eq:1.16}
+\end{align}
+where \(\dfrac{\partial \eta_n}{\partial \sigma_n} = 1\) and
+\begin{align}
+    \frac{\partial \Gamma_n}{\partial \sigma_n}
+    &= \pds{n}\!\left((\kappa^2 + \gamma^2)^{1/2}\right)
+     = \pds{n}\!\left((\kappa^2 + s\mu_n\eta_n)^{1/2}\right)
+     = \pds{n}\!\left((\kappa^2 + s\mu_n(\sigma_n + s\varepsilon_n))^{1/2}\right) \nonumber \\
+    &= \pds{n}\!\left((\kappa^2 + s\mu_n\sigma_n + s^2\mu_n\varepsilon_n)^{1/2}\right)
+     = \frac{s\mu_n}{2\Gamma_n}
+    \label{eq:1.17}
+\end{align}
+for the isotropic case, \(\eta_n=\eta_n^v\). In the VTI formulation,
+the corresponding derivatives of \(\Gamma\) and \(\bar\Gamma\) are
+\begin{align}
+    \frac{\partial \Gamma_n}{\partial \sigma_n}
+    &= \pds{n}\!\left(\left(\frac{\eta_n}{\eta^v_n}\right)^{1/2}(\kappa^2 + \gamma^2)^{1/2}\right)
+     = \frac{\Gamma_n}{2\eta_n}
+    \label{eq:1.18} \\
+    \frac{\partial \bar{\Gamma}_n}{\partial \sigma_n}
+    &= \pds{n}\!\left(\left(\frac{\zeta_n}{\zeta^v_n}\right)^{1/2}(\kappa^2 + \bar{\gamma}^2)^{1/2}\right)
+     = \left(\frac{\zeta^v_n}{\zeta_n}\right)^{1/2}\frac{s\mu^v_n}{2\bar{\Gamma}_n}
+    \label{eq:1.19} \\
+    \frac{\partial \Gamma_n}{\partial \sigma^v_n}
+    &= \left(\frac{\eta^v_n}{\eta_n}\right)^{1/2}\frac{s\mu^v_n}{2\bar{\Gamma}_n}
+       - \frac{\Gamma_n}{2\eta^v_n}
+    \label{eq:1.20} \\
+    \frac{\partial \bar{\Gamma}_n}{\partial \sigma^v_n}
+    &= 0
+    \label{eq:1.21}
+\end{align}
+The final relation implies
+\(\partial r^{TE}/\partial\sigma_n^v=0\). Thus the TE-mode expressions
+depend only on the horizontal medium properties, confirming the structural
+asymmetry identified in \Cref{sec:propagation-constants}.
+
+\subsection{Derivatives of the global reflection coefficients}
+\label{sec:global_refl}
+
+The upward- and downward-looking global reflection coefficients
+\(R_n^{TE,TM\pm}\) have the same general recursive structure for the TE
+and TM modes:
+\begin{equation}
+    R_n^{TE,TM} =
+        \frac{r_n^{TE,TM} + R_{n+1}^{TE,TM}\exp(-2\Gamma_{n+1}\,d_{n+1})}
+             {1 + r_n^{TE,TM}\,R_{n+1}^{TE,TM}\exp(-2\Gamma_{n+1}\,d_{n+1})}
+    \label{eq:1.22}
+\end{equation}
+For a perturbation of layer \(n\), the direct dependence enters through
+\(r_n\), allowing \(\partial R_n/\partial\sigma_n\) to be written as
+\begin{equation}
+    \frac{\partial R_n}{\partial \sigma_n} =
+        \frac{\partial R_n}{\partial r_n}\,\frac{\partial r_n}{\partial \sigma_n}
+    \label{eq:1.23}
+\end{equation}
+where the required partial derivative with respect to \(r_n\) is
+\begin{equation}
+    \frac{\partial R_n}{\partial r_n} =
+        \frac{1 - R_n\,R_{n+1}\exp(-2\Gamma_{n+1}\,d_{n+1})}
+             {1 + r_n\,R_{n+1}\exp(-2\Gamma_{n+1}\,d_{n+1})}
+    \label{eq:1.24}
+\end{equation}
+When the recursion is continued to layer \(n-1\), the derivative
+\(\partial R_{n-1}/\partial\sigma_n\) must be evaluated:
+\begin{equation}
+    R_{n-1} =
+        \frac{r_{n-1} + R_n\exp(-2\Gamma_n\,d_n)}
+             {1 + r_{n-1}\,R_n\exp(-2\Gamma_n\,d_n)}
+    \label{eq:1.25}
+\end{equation}
+At this stage, \(r_{n-1}\), \(R_n\), and \(E_n^2\) all carry a
+dependence on \(\sigma_n\):
+\begin{equation}
+    \frac{\partial R_{n-1}}{\partial \sigma_n} =
+        \frac{\partial R_{n-1}}{\partial r_{n-1}}\,\frac{\partial r_{n-1}}{\partial \sigma_n}
+      + \frac{\partial R_{n-1}}{\partial R_n}\,\frac{\partial R_n}{\partial \sigma_n}
+      + \frac{\partial R_{n-1}}{\partial E_n^2}\,\frac{\partial E_n^2}{\partial \sigma_n}
+    \label{eq:1.26}
+\end{equation}
+with \(E_n^2 = \exp(-2\Gamma_n\,d_n)\) and with
+\begin{align}
+    \frac{\partial R_{n-1}}{\partial r_{n-1}}
+    &= \frac{1 - R_{n-1}\,R_n\exp(-2\Gamma_n\,d_n)}
+            {1 + r_{n-1}\,R_n\exp(-2\Gamma_n\,d_n)}
+    \label{eq:1.27} \\
+    \frac{\partial R_{n-1}}{\partial R_n}
+    &= \frac{(1 - r_{n-1}\,R_{n-1})\exp(-2\Gamma_n\,d_n)}
+            {1 + r_{n-1}\,R_n\exp(-2\Gamma_n\,d_n)}
+    \label{eq:1.28} \\
+    \frac{\partial R_{n-1}}{\partial E_n^2}
+    &= \frac{R_n(1 - r_{n-1}\,R_{n-1})}
+            {1 + r_{n-1}\,R_n\exp(-2\Gamma_n\,d_n)}
+    \label{eq:1.29} \\
+    \frac{\partial E_n^2}{\partial \sigma_n}
+    &= -2d_n\exp(-2\Gamma_n\,d_n)\,(\pds{n}\Gamma_n)
+    \label{eq:1.30}
+\end{align}
+\(\pds{n}\Gamma_n\) is given by Equations~\eqref{eq:1.18}--\eqref{eq:1.21}.
+For the downward reflection \(\dfrac{\partial R_n}{\partial
+\sigma_{n+1}} = 0\).
+
+Continuing the recursion one layer farther gives the derivative
+\(\partial R_{n-2}/\partial\sigma_n\):
+\begin{equation}
+    \frac{\partial R_{n-2}}{\partial \sigma_n} =
+        \frac{\partial R_{n-2}}{\partial R_{n-1}}\,\frac{\partial R_{n-1}}{\partial \sigma_n}
+    \label{eq:1.31}
+\end{equation}
+with
+\begin{equation}
+    \frac{\partial R_{n-2}}{\partial R_{n-1}} =
+        \frac{(1 - r_{n-2}\,R_{n-2})\exp(-2\Gamma_{n-1}\,d_{n-1})}
+             {1 + r_{n-2}\,R_{n-1}\exp(-2\Gamma_{n-1}\,d_{n-1})}
+    \label{eq:1.32}
+\end{equation}
+Equation~\eqref{eq:1.31} shows that, for \(k\leq n-2\), the effect of
+the conductivity perturbation is propagated recursively through the global
+reflection coefficients, giving
+\begin{equation}
+    \frac{\partial R_k}{\partial \sigma_n} =
+        \frac{\partial R_k}{\partial R_{k+1}}\,\frac{\partial R_{k+1}}{\partial \sigma_n}
+    \label{eq:1.33}
+\end{equation}
+The general pattern is therefore to introduce the perturbation in the
+local reflection coefficient associated with layer \(n\), and then
+propagate its effect through the stack one layer at a time via
+\(\partial R_k/\partial R_{k+1}\). The same structure applies to other
+medium-parameter Jacobians, with an appropriately modified driving term;
+here it is specialized to conductivity.
+
+\subsection{Derivatives of the EM field components}
+\label{sec:field_comps}
+
+The vertical electric field component is
+\begin{equation}
+    \hat{G}^{ze;xe;s}(\mathbf{x},\mathbf{x}_0,\omega)
+    = \hat{G}^{ze;xe;s:i}(\mathbf{x}-\mathbf{x}_0,\omega)
+    + \frac{\cos\phi}{4\pi\eta^v_s}
+      \int_{0}^{\infty} \tilde{g}^{TM}_{zh;s}\,J_1(\kappa r)\,\kappa^2\,\mathrm{d}\kappa
+    \label{eq:1.34}
+\end{equation}
+and its derivative follows as:
+\begin{align}
+    \frac{\partial \hat{G}^{ze;xe;s}(\mathbf{x},\mathbf{x}_0,\omega)}{\partial \sigma_n}
+    &= \frac{\partial}{\partial \sigma_n}\hat{G}^{ze;xe;s:i}(\mathbf{x}-\mathbf{x}_0,\omega)
+     + \frac{\cos\phi}{4\pi\eta^v_s}
+       \int_{0}^{\infty}
+         \frac{\partial \tilde{g}^{TM}_{zh;s}}{\partial \sigma_n}
+         J_1(\kappa r)\,\kappa^2\,\mathrm{d}\kappa
+    \label{eq:1.35}
+\end{align}
+The remaining electric-field components are
+\begin{align}
+    \hat{G}^{xe;xe;s}(\mathbf{x},\mathbf{x}_0,\omega)
+    &= \hat{G}^{xe;xe;s:i}(\mathbf{x}-\mathbf{x}_0,\omega)
+     + \frac{1}{8\pi}
+       \int_{0}^{\infty}\!
+         \left(\frac{\Gamma_s\,\tilde{g}^{TM}_{hh;s}}{\eta_s}
+              -\frac{\zeta_s\,\tilde{g}^{TE}_{zz;s}}{\bar{\Gamma}_s}\right)
+         J_0(\kappa r)\,\kappa\,\mathrm{d}\kappa \nonumber \\
+    &\quad
+     - \frac{\cos(2\phi)}{8\pi}
+       \int_{0}^{\infty}\!
+         \left(\frac{\Gamma_s\,\tilde{g}^{TM}_{hh;s}}{\eta_s}
+              +\frac{\zeta_s\,\tilde{g}^{TE}_{zz;s}}{\bar{\Gamma}_s}\right)
+         J_2(\kappa r)\,\kappa\,\mathrm{d}\kappa
+    \label{eq:1.36} \\
+    \hat{G}^{ye;xe;s}(\mathbf{x},\mathbf{x}_0,\omega)
+    &= \hat{G}^{ye;xe;s:i}(\mathbf{x}-\mathbf{x}_0,\omega)
+     - \frac{\sin(2\phi)}{8\pi}
+       \int_{0}^{\infty}\!
+         \left(\frac{\Gamma_s\,\tilde{g}^{TM}_{hh;s}}{\eta_s}
+              +\frac{\zeta_s\,\tilde{g}^{TE}_{zz;s}}{\bar{\Gamma}_s}\right)
+         J_2(\kappa r)\,\kappa\,\mathrm{d}\kappa
+    \label{eq:1.37}
+\end{align}
+Their derivatives are obtained in the same manner; the complete
+expressions are given in \Cref{sec:horizontal_field_derivs}.
+
+\begin{quote}
+\small\itshape
+\textbf{Worked example.} For the isotropic case (\(\sigma=\sigma^v\)) and
+source/receiver both \(x\)-directed electric dipoles, Equation
+\eqref{eq:1.36} is the field \(d = \hat G^{ee}_{xx;s}\) whose Jacobian
+\(J=\partial d/\partial\sigma_n\) is a standard sanity-check case: since
+Bessel functions and \(\kappa\) do not depend on \(\sigma_n\), the
+derivative enters the integral directly and only the kernel derivatives
+\(\partial\tilde g^{TM}_{hh;s}/\partial\sigma_n\),
+\(\partial\tilde g^{TE}_{zz;s}/\partial\sigma_n\)
+(\Cref{sec:hh_kernel}, \ref{sec:te_kernel}) need to be found, plus, when
+\(n=s\), the direct dependence of the \(\Gamma_s/\eta_s\) and
+\(\zeta_s/\bar\Gamma_s\) prefactors on \(\sigma_s\)
+(\Cref{sec:horizontal_field_derivs}).
+\end{quote}
+
+\subsection{Derivatives of the integral coefficients}
+\label{sec:integral_coeff}
+
+The TE- and TM-mode integrals are given by
+\begin{align}
+    I^0_X &= \int_0^{\infty} \kappa\,J_0(\kappa r)\,g^X\,\mathrm{d}\kappa
+    \label{eq:1.38} \\
+    I^1_X &= \int_0^{\infty} J_1(\kappa r)\,g^X\,\mathrm{d}\kappa
+    \label{eq:1.39}
+\end{align}
+where \(J_0(\kappa r)\) and \(J_1(\kappa r)\) are the zero- and
+first-order Bessel functions and \(g^X\) are the integral kernels. The
+derivatives of the Hankel integrals are given by
+\begin{equation}
+    \frac{\partial I^0_X}{\partial \sigma_n}
+    = \frac{\partial}{\partial \sigma_n}\int_0^{\infty}\kappa\,J_0(\kappa r)\,g^X\,\mathrm{d}\kappa
+    = \int_0^{\infty}\kappa\,J_0(\kappa r)\,\frac{\partial g^X}{\partial \sigma_n}\,\mathrm{d}\kappa
+    \label{eq:1.40}
+\end{equation}
+To differentiate the integral coefficient
+\(\tilde g^{TM}_{zh;s}\) in Equation~\eqref{eq:1.34}, the derivatives of
+the field propagators and of the factors \(P_s^{u\pm}\) and
+\(P_s^{d\pm}\) from \Cref{sec:tmte} are required:
+\begin{equation}
+    \tilde{g}^{TM}_{zh;s} = P_s^{u-}\,W_s^u - P_s^{d-}\,W_s^d
+    \label{eq:1.41}
+\end{equation}
+The relevant propagators and amplitude factors are
+\begin{align}
+    W_n^u &= \exp\!\left[-\Gamma_n(z_n - z)\right] \label{eq:1.42} \\
+    W_n^d &= \exp\!\left[-\Gamma_n(z - z_{n-1})\right] \label{eq:1.43}
+\end{align}
+and
+\begin{align}
+    P_s^{u\pm} &= \frac{R_s^+}{M_s}
+        \left(\exp(-\Gamma_s\,d^+) \pm R_s^-\exp\!\left[-\Gamma_s(d_s+d^-)\right]\right)
+    \label{eq:1.44} \\
+    P_s^{d\pm} &= \frac{R_s^-}{M_s}
+        \left(\exp(-\Gamma_s\,d^-) \pm R_s^+\exp\!\left[-\Gamma_s(d_s+d^+)\right]\right)
+    \label{eq:1.45}
+\end{align}
+In these equations the factor \(M_s\) is given by
+\begin{equation}
+    M_s = 1 - R_s^-\,R_s^+\exp(-2\Gamma_s\,d_s)
+    \label{eq:1.46}
+\end{equation}
+The derivative of the integral coefficient follows from the chain rule:
+\begin{align}
+    \frac{\partial \tilde{g}^{TM}_{zh;s}}{\partial \sigma_n}
+    &= \frac{\partial \tilde{g}^{TM}_{zh;s}}{\partial P_s^{u-}}\,
+       \frac{\partial P_s^{u-}}{\partial \sigma_n}
+     + \frac{\partial \tilde{g}^{TM}_{zh;s}}{\partial W_s^u}\,
+       \frac{\partial W_s^u}{\partial \sigma_n}
+     + \frac{\partial \tilde{g}^{TM}_{zh;s}}{\partial P_s^{d-}}\,
+       \frac{\partial P_s^{d-}}{\partial \sigma_n}
+     + \frac{\partial \tilde{g}^{TM}_{zh;s}}{\partial W_s^d}\,
+       \frac{\partial W_s^d}{\partial \sigma_n}
+    \label{eq:1.47} \\
+    &= W_s^u\,\frac{\partial P_s^{u-}}{\partial \sigma_n}
+     + P_s^{u-}\,\frac{\partial W_s^u}{\partial \sigma_n}
+     - W_s^d\,\frac{\partial P_s^{d-}}{\partial \sigma_n}
+     - P_s^{d-}\,\frac{\partial W_s^d}{\partial \sigma_n}
+    \label{eq:1.48}
+\end{align}
+where
+\begin{align}
+    \frac{\partial W_s^u}{\partial \sigma_n}
+    &= -(z_n - z)\exp\!\left[-\Gamma_n(z_n-z)\right](\pds{n}\Gamma_n)
+    \label{eq:1.49} \\
+    \frac{\partial W_s^d}{\partial \sigma_n}
+    &= -(z - z_{n-1})\exp\!\left[-\Gamma_n(z-z_{n-1})\right](\pds{n}\Gamma_n)
+    \label{eq:1.50}
+\end{align}
+and
+\begin{equation}
+    \frac{\partial P_s^{u\pm}}{\partial \sigma_n}
+    = \frac{\partial P_s^{u\pm}}{\partial R_s^+}\,\frac{\partial R_s^+}{\partial \sigma_n}
+    + \frac{\partial P_s^{u\pm}}{\partial R_s^-}\,\frac{\partial R_s^-}{\partial \sigma_n}
+    + \frac{\partial P_s^{u\pm}}{\partial M_s}\,\frac{\partial M_s}{\partial \sigma_n}
+    + \frac{\partial P_s^{u\pm}}{\partial E_1^u}\,\frac{\partial E_1^u}{\partial \sigma_n}
+    + \frac{\partial P_s^{u\pm}}{\partial E_2^u}\,\frac{\partial E_2^u}{\partial \sigma_n}
+    \label{eq:1.51}
+\end{equation}
+The derivative \(\partial P_s^{u\pm}/\partial\sigma_n\) requires the
+following structural partial derivatives:
+\begin{align}
+    \frac{\partial P_s^{u\pm}}{\partial R_s^+}
+    &= \frac{1}{M_s}
+       \left(\exp(-\Gamma_s\,d^+) \pm R_s^-\exp\!\left[-\Gamma_s(d_s+d^-)\right]\right)
+    \label{eq:1.52} \\
+    \frac{\partial P_s^{u\pm}}{\partial M_s}
+    &= \frac{R_s^+}{M_s^2}
+       \left(\exp(-\Gamma_s\,d^+) \pm R_s^-\exp\!\left[-\Gamma_s(d_s+d^-)\right]\right)
+    \label{eq:1.53} \\
+    \frac{\partial P_s^{u\pm}}{\partial R_s^-}
+    &= \pm\frac{R_s^+}{M_s}\exp\!\left[-\Gamma_s(d_s+d^-)\right]
+    \label{eq:1.54} \\
+    \frac{\partial P_s^{u\pm}}{\partial E_1^u}
+    &= \frac{R_s^+}{M_s}
+    \label{eq:1.55} \\
+    \frac{\partial P_s^{u\pm}}{\partial E_2^u}
+    &= \pm\frac{R_s^-\,R_s^+}{M_s}
+    \label{eq:1.56} \\
+    \frac{\partial M_s}{\partial \sigma_n}
+    &= \frac{\partial M_s}{\partial R_s^-}\,\frac{\partial R_s^-}{\partial \sigma_n}
+     + \frac{\partial M_s}{\partial R_s^+}\,\frac{\partial R_s^+}{\partial \sigma_n}
+     + \frac{\partial M_s}{\partial E_3}\,\frac{\partial E_3}{\partial \sigma_n}
+    \label{eq:1.57} \\
+    \frac{\partial M_s}{\partial R_s^\pm}
+    &= R_s^\mp\exp(-2\Gamma_s\,d_s)
+    \label{eq:1.58} \\
+    \frac{\partial M_s}{\partial E_3}
+    &= R_s^-\,R_s^+
+    \label{eq:1.59} \\
+    \frac{\partial E_3}{\partial \sigma_n}
+    &= -2d_s\exp(-2\Gamma_s\,d_s)\,\pds{n}\Gamma_s
+    \label{eq:1.60} \\
+    \frac{\partial E_1^u}{\partial \sigma_n}
+    &= -d^+\exp(-\Gamma_s\,d^+)\,\pds{n}\Gamma_s
+    \label{eq:1.61} \\
+    \frac{\partial E_2^u}{\partial \sigma_n}
+    &= -(d_s+d^-)\exp\!\left[-\Gamma_s(d_s+d^-)\right]\pds{n}\Gamma_s
+    \label{eq:1.62}
+\end{align}
+The quantities \(\partial R_s^\pm/\partial\sigma_n\) are obtained from
+the reflection-coefficient recursion derived above.
+
+The derivative of \(P_s^{d\pm}\) is obtained analogously:
+\begin{equation}
+    \frac{\partial P_s^{d\pm}}{\partial \sigma_n}
+    = \frac{\partial P_s^{d\pm}}{\partial R_s^-}\,\frac{\partial R_s^-}{\partial \sigma_n}
+    + \frac{\partial P_s^{d\pm}}{\partial R_s^+}\,\frac{\partial R_s^+}{\partial \sigma_n}
+    + \frac{\partial P_s^{d\pm}}{\partial M_s}\,\frac{\partial M_s}{\partial \sigma_n}
+    + \frac{\partial P_s^{d\pm}}{\partial E_1^d}\,\frac{\partial E_1^d}{\partial \sigma_n}
+    + \frac{\partial P_s^{d\pm}}{\partial E_2^d}\,\frac{\partial E_2^d}{\partial \sigma_n}
+    \label{eq:1.63}
+\end{equation}
+\begin{align}
+    \frac{\partial P_s^{d\pm}}{\partial R_s^-}
+    &= \frac{1}{M_s}
+       \left(\exp(-\Gamma_s\,d^-) \pm R_s^+\exp\!\left[-\Gamma_s(d_s+d^+)\right]\right)
+    \label{eq:1.64} \\
+    \frac{\partial P_s^{d\pm}}{\partial M_s}
+    &= \frac{R_s^-}{M_s^2}
+       \left(\exp(-\Gamma_s\,d^-) \pm R_s^+\exp\!\left[-\Gamma_s(d_s+d^+)\right]\right)
+    \label{eq:1.65} \\
+    \frac{\partial P_s^{d\pm}}{\partial R_s^+}
+    &= \pm\frac{R_s^-}{M_s}\exp\!\left[-\Gamma_s(d_s+d^+)\right]
+    \label{eq:1.66} \\
+    \frac{\partial P_s^{d\pm}}{\partial E_1^d}
+    &= \frac{R_s^-}{M_s}
+    \label{eq:1.67} \\
+    \frac{\partial P_s^{d\pm}}{\partial E_2^d}
+    &= \pm\frac{R_s^+\,R_s^-}{M_s}
+    \label{eq:1.68} \\
+    \frac{\partial M_s}{\partial \sigma_n}
+    &= \frac{\partial M_s}{\partial R_s^+}\,\frac{\partial R_s^+}{\partial \sigma_n}
+     + \frac{\partial M_s}{\partial R_s^-}\,\frac{\partial R_s^-}{\partial \sigma_n}
+     + \frac{\partial M_s}{\partial E_3}\,\frac{\partial E_3}{\partial \sigma_n}
+    \label{eq:1.69} \\
+    \frac{\partial M_s}{\partial R_s^\pm}
+    &= R_s^\mp\exp(-2\Gamma_s\,d_s)
+    \label{eq:1.70} \\
+    \frac{\partial M_s}{\partial E_3}
+    &= R_s^-\,R_s^+
+    \label{eq:1.71} \\
+    \frac{\partial E_3}{\partial \sigma_n}
+    &= -2d_s\exp(-2\Gamma_s\,d_s)\,\pds{n}\Gamma_s
+    \label{eq:1.72} \\
+    \frac{\partial E_1^d}{\partial \sigma_n}
+    &= -d^-\exp(-\Gamma_s\,d^-)\,\pds{n}\Gamma_s
+    \label{eq:1.73} \\
+    \frac{\partial E_2^d}{\partial \sigma_n}
+    &= -(d_s+d^+)\exp\!\left[-\Gamma_s(d_s+d^+)\right]\pds{n}\Gamma_s
+    \label{eq:1.74}
+\end{align}
+
+\subsubsection{TM horizontal kernel \(\tilde{g}^{TM}_{hh;s}\) and its derivatives}
+\label{sec:hh_kernel}
+
+The horizontal TM kernel entering the \(x\)- and \(y\)-directed field
+components in Equations~\eqref{eq:1.36}--\eqref{eq:1.37} is
+\begin{equation}
+    \tilde{g}^{TM}_{hh;s} = P_s^{u+}\,W_s^u + P_s^{d+}\,W_s^d,
+    \label{eq:1.75}
+\end{equation}
+Here \(P_s^{u+}\) and \(P_s^{d+}\) correspond to the \(\pm=+\) cases of
+Equations~\eqref{eq:1.44}--\eqref{eq:1.45}. This definition is consistent
+with the source-depth identity
+\(\partial\tilde{g}^{TM}_{zh;s}/\partial z_0=
+\Gamma_s\tilde{g}^{TM}_{hh;s}\), which lies outside the present scope.
+Applying the product rule gives
+\begin{align}
+    \frac{\partial\tilde{g}^{TM}_{hh;s}}{\partial\sigma_n}
+    &= W_s^u\,\frac{\partial P_s^{u+}}{\partial\sigma_n}
+     + P_s^{u+}\,\frac{\partial W_s^u}{\partial\sigma_n}
+     + W_s^d\,\frac{\partial P_s^{d+}}{\partial\sigma_n}
+     + P_s^{d+}\,\frac{\partial W_s^d}{\partial\sigma_n},
+    \label{eq:1.76}
+\end{align}
+with \(\partial W_s^{u,d}/\partial\sigma_n\) as in
+Equations~\eqref{eq:1.49}--\eqref{eq:1.50}. The chain rule for
+\(\partial P_s^{u+}/\partial\sigma_n\) mirrors Equation~\eqref{eq:1.51}
+with \(\pm=+\):
+\begin{equation}
+    \frac{\partial P_s^{u+}}{\partial\sigma_n}
+    = \frac{\partial P_s^{u+}}{\partial R_s^+}\,\frac{\partial R_s^+}{\partial\sigma_n}
+    + \frac{\partial P_s^{u+}}{\partial R_s^-}\,\frac{\partial R_s^-}{\partial\sigma_n}
+    + \frac{\partial P_s^{u+}}{\partial M_s}\,\frac{\partial M_s}{\partial\sigma_n}
+    + \frac{\partial P_s^{u+}}{\partial E_1^u}\,\frac{\partial E_1^u}{\partial\sigma_n}
+    + \frac{\partial P_s^{u+}}{\partial E_2^u}\,\frac{\partial E_2^u}{\partial\sigma_n},
+    \label{eq:1.77}
+\end{equation}
+with structural partial derivatives (Equations~\eqref{eq:1.52}--\eqref{eq:1.56}
+evaluated at \(\pm=+\)):
+\begin{align}
+    \frac{\partial P_s^{u+}}{\partial R_s^+}
+    &= \frac{E_1^u + R_s^-\,E_2^u}{M_s}, &
+    \frac{\partial P_s^{u+}}{\partial M_s}
+    &= \frac{R_s^+\!\left(E_1^u + R_s^-\,E_2^u\right)}{M_s^2}, \notag \\[2pt]
+    \frac{\partial P_s^{u+}}{\partial R_s^-}
+    &= \frac{R_s^+\,E_2^u}{M_s}, &
+    \frac{\partial P_s^{u+}}{\partial E_1^u}
+    &= \frac{R_s^+}{M_s}, &
+    \frac{\partial P_s^{u+}}{\partial E_2^u}
+    &= \frac{R_s^+\,R_s^-}{M_s}.
+    \label{eq:1.78}
+\end{align}
+The derivative of \(P_s^{d+}\) is obtained in the same way from
+Equation~\eqref{eq:1.63}, evaluated at \(\pm=+\):
+\begin{equation}
+    \frac{\partial P_s^{d+}}{\partial\sigma_n}
+    = \frac{\partial P_s^{d+}}{\partial R_s^-}\,\frac{\partial R_s^-}{\partial\sigma_n}
+    + \frac{\partial P_s^{d+}}{\partial R_s^+}\,\frac{\partial R_s^+}{\partial\sigma_n}
+    + \frac{\partial P_s^{d+}}{\partial M_s}\,\frac{\partial M_s}{\partial\sigma_n}
+    + \frac{\partial P_s^{d+}}{\partial E_1^d}\,\frac{\partial E_1^d}{\partial\sigma_n}
+    + \frac{\partial P_s^{d+}}{\partial E_2^d}\,\frac{\partial E_2^d}{\partial\sigma_n},
+    \label{eq:1.79}
+\end{equation}
+\begin{align}
+    \frac{\partial P_s^{d+}}{\partial R_s^-}
+    &= \frac{E_1^d + R_s^+\,E_2^d}{M_s}, &
+    \frac{\partial P_s^{d+}}{\partial M_s}
+    &= \frac{R_s^-\!\left(E_1^d + R_s^+\,E_2^d\right)}{M_s^2}, \notag \\[2pt]
+    \frac{\partial P_s^{d+}}{\partial R_s^+}
+    &= \frac{R_s^-\,E_2^d}{M_s}, &
+    \frac{\partial P_s^{d+}}{\partial E_1^d}
+    &= \frac{R_s^-}{M_s}, &
+    \frac{\partial P_s^{d+}}{\partial E_2^d}
+    &= \frac{R_s^+\,R_s^-}{M_s}.
+    \label{eq:1.80}
+\end{align}
+The derivatives \(\partial M_s/\partial\sigma_n\) and
+\(\partial E_i/\partial\sigma_n\) are identical to
+Equations~\eqref{eq:1.57}--\eqref{eq:1.74}.
+
+\subsubsection{TE kernel \(\tilde{g}^{TE}_{zz;s}\) and its derivatives}
+\label{sec:te_kernel}
+
+The TE kernel in Equations~\eqref{eq:1.36}--\eqref{eq:1.37} has the
+same algebraic structure as the TM kernel, with \(\Gamma_s\) replaced by
+\(\bar\Gamma_s\) and TE reflection coefficients used throughout. Define
+the TE field propagators
+\begin{align}
+    \bar{W}_s^u &= \exp\!\left[-\bar\Gamma_s(z_s - z)\right], &
+    \bar{W}_s^d &= \exp\!\left[-\bar\Gamma_s(z - z_{s-1})\right],
+    \label{eq:1.81}
+\end{align}
+the TE multiple-reflection factor
+\begin{equation}
+    \bar{M}_s = 1 - R_s^{TE,-}\,R_s^{TE,+}\exp(-2\bar\Gamma_s\,d_s),
+    \label{eq:1.82}
+\end{equation}
+the TE source-layer exponentials \(\bar{E}_1^u = e^{-\bar\Gamma_s d^+}\),
+\(\bar{E}_2^u = e^{-\bar\Gamma_s(d_s+d^-)}\), \(\bar{E}_3 = e^{-2\bar\Gamma_s d_s}\),
+\(\bar{E}_1^d = e^{-\bar\Gamma_s d^-}\), \(\bar{E}_2^d = e^{-\bar\Gamma_s(d_s+d^+)}\),
+and the TE amplitude factors for the \(+\) variant:
+\begin{align}
+    \bar{P}_s^{u+}
+    &= \frac{R_s^{TE,+}}{\bar{M}_s}
+       \!\left(\bar{E}_1^u + R_s^{TE,-}\,\bar{E}_2^u\right), &
+    \bar{P}_s^{d+}
+    &= \frac{R_s^{TE,-}}{\bar{M}_s}
+       \!\left(\bar{E}_1^d + R_s^{TE,+}\,\bar{E}_2^d\right).
+    \label{eq:1.83}
+\end{align}
+The TE kernel can then be written as
+\begin{equation}
+    \tilde{g}^{TE}_{zz;s} = \bar{P}_s^{u+}\,\bar{W}_s^u + \bar{P}_s^{d+}\,\bar{W}_s^d.
+    \label{eq:1.84}
+\end{equation}
+Because \(\bar\Gamma_n\) does not depend on \(\sigma_n^v\)
+(Equation~\eqref{eq:1.21}), the complete TE kernel is independent of
+vertical conductivity:
+\begin{equation}
+    \frac{\partial\tilde{g}^{TE}_{zz;s}}{\partial\sigma^v_n} = 0
+    \qquad\text{for all }n.
+    \label{eq:1.85}
+\end{equation}
+For horizontal conductivity, the product rule gives
+\begin{align}
+    \frac{\partial\tilde{g}^{TE}_{zz;s}}{\partial\sigma_{h,n}}
+    &= \bar{W}_s^u\,\frac{\partial\bar{P}_s^{u+}}{\partial\sigma_{h,n}}
+     + \bar{P}_s^{u+}\,\frac{\partial\bar{W}_s^u}{\partial\sigma_{h,n}}
+     + \bar{W}_s^d\,\frac{\partial\bar{P}_s^{d+}}{\partial\sigma_{h,n}}
+     + \bar{P}_s^{d+}\,\frac{\partial\bar{W}_s^d}{\partial\sigma_{h,n}},
+    \label{eq:1.86}
+\end{align}
+where the propagator derivatives use \(\partial\bar\Gamma_n/\partial\sigma_{h,n}\)
+from Equation~\eqref{eq:1.19}:
+\begin{align}
+    \frac{\partial\bar{W}_s^u}{\partial\sigma_{h,n}}
+    &= -(z_s - z)\,\bar{W}_s^u\,\frac{\partial\bar\Gamma_n}{\partial\sigma_{h,n}}, &
+    \frac{\partial\bar{W}_s^d}{\partial\sigma_{h,n}}
+    &= -(z - z_{s-1})\,\bar{W}_s^d\,\frac{\partial\bar\Gamma_n}{\partial\sigma_{h,n}}.
+    \label{eq:1.87}
+\end{align}
+The chain rule for \(\bar P_s^{u+}\) follows Equation~\eqref{eq:1.77}
+after applying the substitutions \(R_s^\pm\to R_s^{TE,\pm}\),
+\(M_s\to\bar M_s\), and \(E_i\to\bar E_i\):
+\begin{align}
+    \frac{\partial\bar{P}_s^{u+}}{\partial R_s^{TE,+}}
+    &= \frac{\bar{E}_1^u + R_s^{TE,-}\bar{E}_2^u}{\bar{M}_s}, &
+    \frac{\partial\bar{P}_s^{u+}}{\partial\bar{M}_s}
+    &= \frac{R_s^{TE,+}\!\left(\bar{E}_1^u + R_s^{TE,-}\bar{E}_2^u\right)}{\bar{M}_s^2},
+    \notag \\[2pt]
+    \frac{\partial\bar{P}_s^{u+}}{\partial R_s^{TE,-}}
+    &= \frac{R_s^{TE,+}\,\bar{E}_2^u}{\bar{M}_s}, &
+    \frac{\partial\bar{P}_s^{u+}}{\partial\bar{E}_1^u}
+    &= \frac{R_s^{TE,+}}{\bar{M}_s}, &
+    \frac{\partial\bar{P}_s^{u+}}{\partial\bar{E}_2^u}
+    &= \frac{R_s^{TE,+}\,R_s^{TE,-}}{\bar{M}_s},
+    \label{eq:1.88}
+\end{align}
+\begin{align}
+    \frac{\partial\bar{M}_s}{\partial\sigma_{h,n}}
+    &= \frac{\partial\bar{M}_s}{\partial R_s^{TE,-}}\,\frac{\partial R_s^{TE,-}}{\partial\sigma_{h,n}}
+     + \frac{\partial\bar{M}_s}{\partial R_s^{TE,+}}\,\frac{\partial R_s^{TE,+}}{\partial\sigma_{h,n}}
+     + \frac{\partial\bar{M}_s}{\partial\bar{E}_3}\,\frac{\partial\bar{E}_3}{\partial\sigma_{h,n}},
+    \label{eq:1.89}
+\end{align}
+\begin{align}
+    \frac{\partial\bar{M}_s}{\partial R_s^{TE,\pm}}
+    &= R_s^{TE,\mp}\,\bar{E}_3, &
+    \frac{\partial\bar{M}_s}{\partial\bar{E}_3}
+    &= R_s^{TE,-}\,R_s^{TE,+}, &
+    \frac{\partial\bar{E}_3}{\partial\sigma_{h,n}}
+    &= -2d_s\,\bar{E}_3\,\frac{\partial\bar\Gamma_s}{\partial\sigma_{h,n}},
+    \label{eq:1.90}
+\end{align}
+\begin{align}
+    \frac{\partial\bar{E}_1^u}{\partial\sigma_{h,n}}
+    &= -d^+\,\bar{E}_1^u\,\frac{\partial\bar\Gamma_s}{\partial\sigma_{h,n}}, &
+    \frac{\partial\bar{E}_2^u}{\partial\sigma_{h,n}}
+    &= -(d_s+d^-)\,\bar{E}_2^u\,\frac{\partial\bar\Gamma_s}{\partial\sigma_{h,n}},
+    \label{eq:1.91}
+\end{align}
+The corresponding expressions for \(\bar P_s^{d+}\) follow analogously
+from Equation~\eqref{eq:1.79}:
+\begin{align}
+    \frac{\partial\bar{P}_s^{d+}}{\partial R_s^{TE,-}}
+    &= \frac{\bar{E}_1^d + R_s^{TE,+}\bar{E}_2^d}{\bar{M}_s}, &
+    \frac{\partial\bar{P}_s^{d+}}{\partial\bar{M}_s}
+    &= \frac{R_s^{TE,-}\!\left(\bar{E}_1^d + R_s^{TE,+}\bar{E}_2^d\right)}{\bar{M}_s^2},
+    \notag \\[2pt]
+    \frac{\partial\bar{P}_s^{d+}}{\partial R_s^{TE,+}}
+    &= \frac{R_s^{TE,-}\,\bar{E}_2^d}{\bar{M}_s}, &
+    \frac{\partial\bar{P}_s^{d+}}{\partial\bar{E}_1^d}
+    &= \frac{R_s^{TE,-}}{\bar{M}_s}, &
+    \frac{\partial\bar{P}_s^{d+}}{\partial\bar{E}_2^d}
+    &= \frac{R_s^{TE,+}\,R_s^{TE,-}}{\bar{M}_s},
+    \label{eq:1.92}
+\end{align}
+\begin{align}
+    \frac{\partial\bar{E}_1^d}{\partial\sigma_{h,n}}
+    &= -d^-\,\bar{E}_1^d\,\frac{\partial\bar\Gamma_s}{\partial\sigma_{h,n}}, &
+    \frac{\partial\bar{E}_2^d}{\partial\sigma_{h,n}}
+    &= -(d_s+d^+)\,\bar{E}_2^d\,\frac{\partial\bar\Gamma_s}{\partial\sigma_{h,n}}.
+    \label{eq:1.93}
+\end{align}
+The TE global-reflection derivatives
+\(\partial R_s^{TE,\pm}/\partial\sigma_{h,n}\) follow the recursion in
+\Cref{sec:global_refl}, with
+\((\Gamma,r^{TM},R^{TM})\) replaced by
+\((\bar\Gamma,r^{TE},R^{TE})\).
+
+\subsubsection{Full derivatives of the horizontal field components}
+\label{sec:horizontal_field_derivs}
+
+The horizontal field components in
+Equations~\eqref{eq:1.36}--\eqref{eq:1.37} contain products of the
+source-layer prefactors \(\Gamma_s/\eta_s\) and
+\(\zeta_s/\bar\Gamma_s\) with their respective kernels. If \(n=s\),
+these prefactors also depend on \(\sigma_{\bullet,s}\) and therefore
+contribute additional derivative terms. Applying the product rule gives:
+\begin{equation}
+    \frac{\partial}{\partial\sigma_{\bullet,n}}\!\left(
+        \frac{\Gamma_s}{\eta_s}\,\tilde{g}^{TM}_{hh;s}\right)
+    = \delta_{ns}\,\frac{\partial(\Gamma_s/\eta_s)}{\partial\sigma_{\bullet,s}}
+      \,\tilde{g}^{TM}_{hh;s}
+    + \frac{\Gamma_s}{\eta_s}\,
+      \frac{\partial\tilde{g}^{TM}_{hh;s}}{\partial\sigma_{\bullet,n}},
+    \label{eq:1.94}
+\end{equation}
+\begin{equation}
+    \frac{\partial}{\partial\sigma_{\bullet,n}}\!\left(
+        \frac{\zeta_s}{\bar\Gamma_s}\,\tilde{g}^{TE}_{zz;s}\right)
+    = \delta_{ns}\,\frac{\partial(\zeta_s/\bar\Gamma_s)}{\partial\sigma_{\bullet,s}}
+      \,\tilde{g}^{TE}_{zz;s}
+    + \frac{\zeta_s}{\bar\Gamma_s}\,
+      \frac{\partial\tilde{g}^{TE}_{zz;s}}{\partial\sigma_{\bullet,n}}.
+    \label{eq:1.95}
+\end{equation}
+Because \(\zeta_s=s\mu_s\) has no conductivity dependence, the non-zero
+prefactor derivatives reduce to the following expressions, using
+Equations~\eqref{eq:1.18}--\eqref{eq:1.21}:
+\begin{align}
+    \frac{\partial(\Gamma_s/\eta_s)}{\partial\sigma_{h,s}}
+    &= \frac{(\pds{s}\Gamma_s)\,\eta_s - \Gamma_s}{\eta_s^2}
+     = \frac{\Gamma_s/2 - \Gamma_s}{\eta_s^2}
+     = -\frac{\Gamma_s}{2\eta_s^2},
+    \label{eq:1.96} \\[4pt]
+    \frac{\partial(\Gamma_s/\eta_s)}{\partial\sigma^v_s}
+    &= \frac{1}{\eta_s}\,\frac{\partial\Gamma_s}{\partial\sigma^v_s}
+     = \frac{1}{\eta_s}
+       \!\left[\left(\frac{\eta^v_s}{\eta_s}\right)^{\!1/2}
+               \frac{s\mu^v_s}{2\bar\Gamma_s}
+             - \frac{\Gamma_s}{2\eta^v_s}\right],
+    \label{eq:1.97} \\[4pt]
+    \frac{\partial(\zeta_s/\bar\Gamma_s)}{\partial\sigma_{h,s}}
+    &= -\frac{\zeta_s}{\bar\Gamma_s^2}\,\frac{\partial\bar\Gamma_s}{\partial\sigma_{h,s}}
+     = -\frac{\zeta_s}{\bar\Gamma_s^2}
+       \left(\frac{\zeta^v_s}{\zeta_s}\right)^{\!1/2}\!\frac{s\mu^v_s}{2\bar\Gamma_s},
+    \label{eq:1.98} \\[4pt]
+    \frac{\partial(\zeta_s/\bar\Gamma_s)}{\partial\sigma^v_s}
+    &= 0.
+    \label{eq:1.99}
+\end{align}
+Combining the preceding terms yields the complete derivatives of the
+horizontal field components:
+\begin{align}
+    \frac{\partial\hat{G}^{xe;xe;s}}{\partial\sigma_{\bullet,n}}
+    &= \frac{\partial\hat{G}^{xe;xe;s:i}}{\partial\sigma_{\bullet,n}} \nonumber \\
+    &\quad
+    + \frac{1}{8\pi}\int_0^\infty\!\left[
+        \delta_{ns}\frac{\partial(\Gamma_s/\eta_s)}{\partial\sigma_{\bullet,s}}
+            \tilde{g}^{TM}_{hh;s}
+      + \frac{\Gamma_s}{\eta_s}
+            \frac{\partial\tilde{g}^{TM}_{hh;s}}{\partial\sigma_{\bullet,n}}
+      - \delta_{ns}\frac{\partial(\zeta_s/\bar\Gamma_s)}{\partial\sigma_{\bullet,s}}
+            \tilde{g}^{TE}_{zz;s}
+      - \frac{\zeta_s}{\bar\Gamma_s}
+            \frac{\partial\tilde{g}^{TE}_{zz;s}}{\partial\sigma_{\bullet,n}}
+      \right]J_0(\kappa r)\,\kappa\,\mathrm{d}\kappa \nonumber \\
+    &\quad
+    - \frac{\cos(2\phi)}{8\pi}\int_0^\infty\!\left[
+        \delta_{ns}\frac{\partial(\Gamma_s/\eta_s)}{\partial\sigma_{\bullet,s}}
+            \tilde{g}^{TM}_{hh;s}
+      + \frac{\Gamma_s}{\eta_s}
+            \frac{\partial\tilde{g}^{TM}_{hh;s}}{\partial\sigma_{\bullet,n}}
+      + \delta_{ns}\frac{\partial(\zeta_s/\bar\Gamma_s)}{\partial\sigma_{\bullet,s}}
+            \tilde{g}^{TE}_{zz;s}
+      + \frac{\zeta_s}{\bar\Gamma_s}
+            \frac{\partial\tilde{g}^{TE}_{zz;s}}{\partial\sigma_{\bullet,n}}
+      \right]J_2(\kappa r)\,\kappa\,\mathrm{d}\kappa,
+    \label{eq:1.100}
+\end{align}
+\begin{align}
+    \frac{\partial\hat{G}^{ye;xe;s}}{\partial\sigma_{\bullet,n}}
+    &= \frac{\partial\hat{G}^{ye;xe;s:i}}{\partial\sigma_{\bullet,n}}
+    - \frac{\sin(2\phi)}{8\pi}\int_0^\infty\!\left[
+        \delta_{ns}\frac{\partial(\Gamma_s/\eta_s)}{\partial\sigma_{\bullet,s}}
+            \tilde{g}^{TM}_{hh;s}
+      + \frac{\Gamma_s}{\eta_s}
+            \frac{\partial\tilde{g}^{TM}_{hh;s}}{\partial\sigma_{\bullet,n}}
+      + \delta_{ns}\frac{\partial(\zeta_s/\bar\Gamma_s)}{\partial\sigma_{\bullet,s}}
+            \tilde{g}^{TE}_{zz;s}
+      + \frac{\zeta_s}{\bar\Gamma_s}
+            \frac{\partial\tilde{g}^{TE}_{zz;s}}{\partial\sigma_{\bullet,n}}
+      \right]J_2(\kappa r)\,\kappa\,\mathrm{d}\kappa.
+    \label{eq:1.101}
+\end{align}
+For \(n\neq s\), the Kronecker-delta terms vanish and only the kernel
+derivatives remain. When \(n=s\), the additional prefactor contributions
+from \eqref{eq:1.96}--\eqref{eq:1.99} must also be included. The required
+kernel derivatives are given in \Cref{sec:hh_kernel} and
+\Cref{sec:te_kernel}.
+
+\subsection{From \(\sigma\)-derivatives to a resistivity Jacobian}
+\label{sec:res-code-crosscheck}
+
+The derivatives above are expressed in terms of \(\sigma_n\) and
+\(\sigma_n^v\), or equivalently \(\eta_n,\eta_n^v\) through
+Equations~\eqref{eq:1.5}--\eqref{eq:1.6}. If the model is instead
+parameterized by resistivity \(\rho_n=1/\sigma_n\) and anisotropy
+\(\lambda_n=\sigma_n/\sigma_n^v\), the chain rule provides the conversion
+from conductivity to resistivity derivatives:
+\begin{equation}
+    \eta_n = \frac{1}{\rho_n} + i\omega\varepsilon_0\varepsilon_n, \quad
+    \eta^v_n = \frac{1}{\rho_n\lambda_n^2} + i\omega\varepsilon_0\varepsilon^v_n
+    \quad\Longrightarrow\quad
+    \frac{\partial\eta_n}{\partial\rho_n} = -\frac{1}{\rho_n^2}, \quad
+    \frac{\partial\eta^v_n}{\partial\rho_n} = -\frac{1}{\rho_n^2\lambda_n^2}.
+    \label{eq:res-code-seed}
+\end{equation}
+An implementation based directly on the eta/zeta seeds can therefore use
+\(\partial\eta_n/\partial\rho_n\) and
+\(\partial\eta_n^v/\partial\rho_n\), together with the conductivity
+derivatives derived above, in the chain rule. In particular,
+\(\partial F/\partial\rho_n\) is obtained by combining the horizontal and
+vertical conductivity derivatives with
+\(\partial\sigma_n/\partial\rho_n=-1/\rho_n^2\) and
+\(\partial\sigma_n^v/\partial\rho_n=-1/(\rho_n^2\lambda_n^2)\) at fixed
+\(\lambda_n\).
+
+\chapter{Other gradients}
+
+{\centering
+	\fbox{
+		\begin{minipage}{0.9\textwidth}
+			\centering
+			\vspace{0.5cm}
+			
+			If you are interested in the derivations for the other parameters, or in discussing potential applications, extensions, or collaboration, please feel free to reach out to me at \url{www.wouterdeleersnyder.be}.
+			
+			\vspace{0.5cm}
+		\end{minipage}
+	}
+}
+
+\section{Gradients with respect to the anisotropy factor (aniso)}
+
+\section{Gradients with respect to electric permittivity (epermH, epermV)}
+
+\section{Gradients with respect to magnetic permeability (mpermH, mpermV)}
+
+\section{Gradients with respect to interface depths (depth, thickness)}
+
+\section{Gradients with respect to source/receiver depth}
+
+\section{Gradients with respect to offset (off)}
+
+\section{Gradients with respect to frequency (freq)}
+
+\section{Gradients with respect to horizontal source position}
+
+\section{Gradients with respect to source/receiver orientation}
+
+% ==============================================================
+\appendix
+\chapter{Notation}
+\label{app:notation}
+% ==============================================================
+
+\section{Layer/medium parameters}
+
+\begin{longtable}{lll}
+\toprule
+Symbol & Meaning & Units/notes \\
+\midrule
+\endhead
+\(\rho_n\) & Horizontal resistivity & \(\Omega\)m; \(\rho_n=1/\sigma_n\) \\
+\(\lambda_n=\sigma_n/\sigma^v_n\) & Anisotropy factor & \(=\sqrt{\rho^v_n/\rho_n}\geq 1\) \\
+\(\varepsilon_n,\varepsilon^v_n\) & Relative electric permittivity & horizontal/vertical \\
+\(\mu_n,\mu^v_n\) & Relative magnetic permeability & horizontal/vertical \\
+\(\sigma_n=1/\rho_n,\ \sigma^v_n\) & Horizontal/vertical conductivity & S/m \\
+\(\eta_n,\eta^v_n\) & Admittivity & \(=\sigma+i\omega\varepsilon_0\varepsilon\) \\
+\(\zeta_n,\zeta^v_n\) & Impedivity & \(=i\omega\mu_0\mu\) \\
+\(z_m\) & Interface depth & \\
+\(d_m=z_m-z_{m-1}\) & Layer thickness & finite for interior layers \\
+\(\omega=2\pi f\) & Angular frequency & \\
+\(s=i\omega\) & Laplace/frequency variable & \(e^{+i\omega t}\) convention \\
+\(\varepsilon_0,\mu_0\) & Vacuum permittivity/permeability & \\
+\bottomrule
+\end{longtable}
+
+\section{Propagation, reflection and kernel quantities}
+
+\begin{longtable}{ll}
+\toprule
+Symbol & Meaning \\
+\midrule
+\endhead
+\(\kappa\) & Hankel-transform wavenumber \\
+\(\Gamma_n\) & TM propagation constant (\Cref{sec:propagation-constants}) \\
+\(\bar\Gamma_n\) & TE propagation constant \\
+\(\gamma_n=\sqrt{\zeta_n\eta^v_n}\), \(\bar\gamma_n=\sqrt{\eta_n\zeta^v_n}\) & intermediate quantities \\
+\(r_n^{TE},r_n^{TM}\) & Local reflection coefficients (\Cref{sec:tmte}) \\
+\(R_n^{TE},R_n^{TM}\) & Global reflection coefficients \\
+\(W_s^{u,d},\bar W_s^{u,d}\) & Source-layer field propagators \\
+\(P_s^{u,d\pm},\bar P_s^{u,d\pm}\) & TM/TE amplitude factors \\
+\(M_s,\bar M_s\) & Source-layer multiple factor \\
+\(E_1^{u,d},E_2^{u,d},E_3\) & Source-layer exponentials \\
+\(\tilde g^{TM}_{zh;s},\tilde g^{TM}_{hh;s},\tilde g^{TE}_{zz;s}\) & Integral (wavenumber-domain) kernels \\
+\(\phi\) & Source-receiver azimuth \\
+\(r\) & Source-receiver radial offset \\
+\(z_0^{\mathrm{src}},z\) & Source/receiver depth \\
+\(d^+,d^-\) & Source-to-interface distances \\
+\bottomrule
+\end{longtable}
+
+
+\end{document}
