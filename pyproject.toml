@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "empygrad"
+description = "Analytical resistivity Jacobians for 1D VTI electromagnetic media"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Wouter Deleersnyder"},
+    {name = "The emsig community", email = "info@emsig.xyz"},
+]
+dependencies = ["empymod~=2.6", "numpy>=2.0", "scipy", "numba", "libdlf", "scooby"]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/emsig/empygrad"
+Wouter = "https://www.wouterdeleersnyder.be"
+
+[project.optional-dependencies]
+tests = [
+    "pytest", "pytest-cov", "pytest-mpl", "pytest-console-scripts",
+    "flake8", "flake8-pyproject", "vulture", "coveralls",
+]
+
+[tool.setuptools.packages.find]
+include = ["empygrad*"]
+
+[tool.setuptools_scm]
+version_file = "empygrad/version.py"
+
+[tool.flake8]
+
+[tool.vulture]
+paths = ["empygrad", "tests"]
+min_confidence = 80
+
+[tool.coverage.run]
+relative_files = true
