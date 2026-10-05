@@ -8,12 +8,11 @@ from empygrad.model import (analytical, bipole, dipole,
                             dipole_k, fem, gpr, ip_and_q, tem)
 from empygrad.utils import EMArray, Report, get_minimum, set_minimum
 
-try:
-    __version__ = version("empygrad")
-except PackageNotFoundError:
-    __version__ = "0.1.0"
 
-__all__ = ["__version__", "kernel", "model", "scripts", "utils",
+__all__ = ["kernel", "model", "scripts", "utils",
             "analytical", "bipole", "dipole",
            "dipole_k", "fem", "gpr", "ip_and_q", "tem", "EMArray",
            "Report", "get_minimum", "set_minimum"]
+
+# Version defined in utils, so we can easier use it within the package itself.
+__version__ = utils.__version__
