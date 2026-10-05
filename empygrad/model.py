@@ -435,9 +435,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
        In [2]: EMfield[0]
        Out[2]: (1.6880934577857306e-10-3.083031298956568e-10j)
 
-    Jacobiaan-uitbreiding (res)
-    ---------------------------
-    Met ``jac="res"`` gebruikt de analytische afgeleide eq. (2.5)–(2.101),
+    Jacobian extension (res)
+    ------------------------
+    With ``jac="res"``, the analytical derivative eq. (2.5)–(2.101) is used,
     equations_public.pdf.
     """
     raise NotImplementedError()
@@ -612,9 +612,9 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
           ...: EMfield[0]
        Out[1]: (1.6880934577857306e-10-3.083031298956568e-10j)
 
-    Jacobiaan-uitbreiding (res)
-    ---------------------------
-    Met ``jac="res"`` gebruikt de analytische afgeleide eq. (2.5)–(2.101),
+    Jacobian extension (res)
+    ------------------------
+    With ``jac="res"``, the analytical derivative eq. (2.5)–(2.101) is used,
     equations_public.pdf.
     """
     def _run_wavenumber(eH, eV, zH, zV, lmbd, jH, jV, jzH, jzV):
@@ -630,7 +630,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 def _parse_jac(jac):
     r"""Normalise the ``jac`` argument to ``None`` or a list of strings.
 
-    Resistiviteitsafgeleide: eq. (2.5)–(2.6), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
     """
     raise NotImplementedError()
 
@@ -638,7 +638,7 @@ def _parse_jac(jac):
 def _stacked_eta_seeds(eta_params, etaH, res, aniso, freq):
     r"""Compute stacked d(etaH, etaV)/d(param) seed matrices.
 
-    Resistiviteitsafgeleide: eq. (2.5)–(2.6), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
     """
     raise NotImplementedError()
 
@@ -648,7 +648,7 @@ def _fem_jac_columns(ab, off, angle, zsrc, zrec, lsrc, lrec, depth, freq,
                      msrc, mrec, seeds, dlf_filt):
     r"""Jacobian of the frequency-domain field for a single ``ab`` (bipole).
 
-    Resistiviteitsafgeleide: eq. (2.41), (2.75), (2.84), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.41), (2.75), (2.84), equations_public.pdf.
     """
     raise NotImplementedError()
 
@@ -656,7 +656,7 @@ def _fem_jac_columns(ab, off, angle, zsrc, zrec, lsrc, lrec, depth, freq,
 def _build_bipole_jac_seeds(jac_params, etaH, res, aniso, freq, n_interfaces):
     r"""Assemble the position-independent unified kernel-seed arrays for the
 
-    Resistiviteitsafgeleide: eq. (2.5)–(2.6), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
     """
     raise NotImplementedError()
 

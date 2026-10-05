@@ -186,7 +186,7 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
                      jac_etaH, jac_etaV, jac_zetaH):
     r"""Fill jac_Gam in-place for the TM non-MM case (explicit scalar loops).
 
-    Resistiviteitsafgeleide: eq. (2.17)–(2.20), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.17)–(2.20), equations_public.pdf.
     """
     raise NotImplementedError()
 
@@ -196,7 +196,7 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, etaH, zetaH, zetaV,
                      jac_etaH, jac_zetaH, jac_zetaV):
     r"""Fill jac_Gam in-place for the TE non-MM and TM-MM cases.
 
-    Resistiviteitsafgeleide: eq. (2.21), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.21), equations_public.pdf.
     """
     raise NotImplementedError()
 
@@ -206,7 +206,7 @@ def _wavenumber_jac_collect(jac_PTM, jac_PTE, lambd, ab, sign,
                             jac_PJ0, jac_PJ1, jac_PJ0b):
     r"""Fill jac_PJ0/PJ1/PJ0b in-place from jac_PTM/jac_PTE.
 
-    Resistiviteitsafgeleide: eq. (2.41), (2.75), (2.84),
+    Resistivity Jacobian: eq. (2.41), (2.75), (2.84),
     equations_public.pdf.
     """
     raise NotImplementedError()
@@ -217,7 +217,7 @@ def _fullspace_derivative(off, angle, zsrc, zrec, etaH, etaV, zetaH, zetaV, ab,
                           jac_zsrc, jac_zrec):
     r"""Return ``d(fullspace)/d(param)``, the analytical direct-field Jacobian.
 
-    Resistiviteitsafgeleide: eq. (2.34)–(2.35), equations_public.pdf.
+    Resistivity Jacobian: eq. (2.34)–(2.35), equations_public.pdf.
     """
     raise NotImplementedError()
 
@@ -229,8 +229,8 @@ def greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
                    jac_rec_z_indicator=None, rec_z_col=-1):
     r"""Pure-numpy Green's function with Jacobian (no jac_mode branching).
 
-    Leesreferentie; niet in productie. Getoetst met de oracle-test.
-    Resistiviteitsafgeleide: eq. (2.41), (2.75), (2.84),
+    Reading reference; not used in production. Verified by the oracle test.
+    Resistivity Jacobian: eq. (2.41), (2.75), (2.84),
     equations_public.pdf.
     """
     raise NotImplementedError()
@@ -240,8 +240,8 @@ def reflections_numpy(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None,
                       jac_Gam=None, jac_depth_lower=None):
     r"""Pure-numpy fallback for reflections (used in tests / reference checks).
 
-    Leesreferentie; niet in productie. Getoetst met de oracle-test.
-    Resistiviteitsafgeleide: eq. (2.11)–(2.33),
+    Reading reference; not used in production. Verified by the oracle test.
+    Resistivity Jacobian: eq. (2.11)–(2.33),
     equations_public.pdf.
     """
     raise NotImplementedError()
@@ -251,8 +251,8 @@ def fields_numpy(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
                  jac_Rp=None, jac_Rm=None, jac_Gam=None, jac_dists=None):
     r"""Pure-numpy fallback for fields (used in tests / reference checks).
 
-    Leesreferentie; niet in productie. Getoetst met de oracle-test.
-    Resistiviteitsafgeleide: eq. (2.44)–(2.93),
+    Reading reference; not used in production. Verified by the oracle test.
+    Resistivity Jacobian: eq. (2.44)–(2.93),
     equations_public.pdf.
     """
     raise NotImplementedError()
