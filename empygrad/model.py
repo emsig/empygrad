@@ -627,6 +627,7 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
     raise NotImplementedError()
 
+
 def _parse_jac(jac):
     r"""Normalise the ``jac`` argument to ``None`` or a list of strings.
 
@@ -659,5 +660,3 @@ def _build_bipole_jac_seeds(jac_params, etaH, res, aniso, freq, n_interfaces):
     Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
     """
     raise NotImplementedError()
-
-
