@@ -7,8 +7,22 @@ from empymod.utils import (EMArray, check_ab, check_bipole,
                            conv_warning, get_abs, get_azm_dip,
                            get_geo_fact, get_kwargs, get_layer_nr, get_minimum,
                            get_off_ang, printstartfinish, set_minimum)
-from empymod.utils import __version__
+from datetime import datetime
+
 from scooby import Report as ScoobyReport
+
+# Version: We take care of it here instead of in __init__, so we can use it
+# within the package itself (logs).
+try:
+    # - Released versions just tags:       0.10.0
+    # - GitHub commits add .dev#+hash:     0.10.1.dev3+g973038c
+    # - Uncommitted changes add timestamp: 0.10.1.dev3+g973038c.d20191022
+    from empygrad.version import version as __version__
+except ImportError:
+    # If it was not installed, then we don't know the version. We could throw a
+    # warning here, but this case *should* be rare. empymod should be installed
+    # properly!
+    __version__ = 'unknown-'+datetime.today().strftime('%Y%m%d')
 
 __all__ = ["EMArray", "Report", "check_ab", "check_bipole",
            "check_dipole", "check_frequency", "check_hankel",
@@ -19,6 +33,7 @@ __all__ = ["EMArray", "Report", "check_ab", "check_bipole",
            "get_minimum", "get_off_ang", "printstartfinish",
            "set_minimum", "__version__"]
 
+
 class Report(ScoobyReport):
     r"""Print date, time, and version information.
 
@@ -27,7 +42,7 @@ class Report(ScoobyReport):
     console), either as html-table (notebook) or as plain text (anywhere).
 
     Always shown are the OS, number of CPU(s), `numpy`, `scipy`, `numba`,
-    `empymod`, `sys.version`, and time/date.
+    `empymod`, 'empygrad', `sys.version`, and time/date.
 
     Additionally shown are, if they can be imported, `IPython`, and
     `matplotlib`. It also shows MKL information, if available.
@@ -61,7 +76,7 @@ class Report(ScoobyReport):
     --------
     >>> import pytest
     >>> import dateutil
-    >>> from empymod import Report
+    >>> from empygrad import Report
     >>> Report()                            # Default values
     >>> Report(pytest)                      # Provide additional package
     >>> Report([pytest, dateutil], ncol=5)  # Set nr of columns
