@@ -1,4 +1,6 @@
-"""Re-export the unchanged empymod 2.6 input and output utilities."""
+"""Input/output utilities: empymod 2.6 helpers re-exported, plus `Report`."""
+
+from datetime import datetime
 
 from empymod.utils import (EMArray, check_ab, check_bipole,
                            check_dipole, check_frequency, check_hankel,
@@ -7,8 +9,6 @@ from empymod.utils import (EMArray, check_ab, check_bipole,
                            conv_warning, get_abs, get_azm_dip,
                            get_geo_fact, get_kwargs, get_layer_nr, get_minimum,
                            get_off_ang, printstartfinish, set_minimum)
-from datetime import datetime
-
 from scooby import Report as ScoobyReport
 
 # Version: We take care of it here instead of in __init__, so we can use it
@@ -20,8 +20,8 @@ try:
     from empygrad.version import version as __version__
 except ImportError:
     # If it was not installed, then we don't know the version. We could throw a
-    # warning here, but this case *should* be rare. empymod should be installed
-    # properly!
+    # warning here, but this case *should* be rare. empygrad should be
+    # installed properly!
     __version__ = 'unknown-'+datetime.today().strftime('%Y%m%d')
 
 __all__ = ["EMArray", "Report", "check_ab", "check_bipole",
@@ -42,7 +42,7 @@ class Report(ScoobyReport):
     console), either as html-table (notebook) or as plain text (anywhere).
 
     Always shown are the OS, number of CPU(s), `numpy`, `scipy`, `numba`,
-    `empymod`, 'empygrad', `sys.version`, and time/date.
+    `empymod`, `empygrad`, `libdlf`, `sys.version`, and time/date.
 
     Additionally shown are, if they can be imported, `IPython`, and
     `matplotlib`. It also shows MKL information, if available.
