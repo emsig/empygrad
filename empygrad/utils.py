@@ -1,6 +1,6 @@
 """Re-export the unchanged empymod 2.6 input and output utilities."""
 
-from empymod.utils import (EMArray, Report, check_ab, check_bipole,
+from empymod.utils import (EMArray, check_ab, check_bipole,
                            check_dipole, check_frequency, check_hankel,
                            check_loop, check_model, check_solution,
                            check_time, check_time_only, check_waveform,
@@ -8,6 +8,7 @@ from empymod.utils import (EMArray, Report, check_ab, check_bipole,
                            get_geo_fact, get_kwargs, get_layer_nr, get_minimum,
                            get_off_ang, printstartfinish, set_minimum)
 from empymod.utils import __version__
+from scooby import Report as ScoobyReport
 
 __all__ = ["EMArray", "Report", "check_ab", "check_bipole",
            "check_dipole", "check_frequency", "check_hankel",
@@ -17,3 +18,64 @@ __all__ = ["EMArray", "Report", "check_ab", "check_bipole",
            "get_layer_nr",
            "get_minimum", "get_off_ang", "printstartfinish",
            "set_minimum", "__version__"]
+
+class Report(ScoobyReport):
+    r"""Print date, time, and version information.
+
+    Use `scooby` to print date, time, and package version information in any
+    environment (Jupyter notebook, IPython console, Python console, QT
+    console), either as html-table (notebook) or as plain text (anywhere).
+
+    Always shown are the OS, number of CPU(s), `numpy`, `scipy`, `numba`,
+    `empymod`, `sys.version`, and time/date.
+
+    Additionally shown are, if they can be imported, `IPython`, and
+    `matplotlib`. It also shows MKL information, if available.
+
+    All modules provided in `add_pckg` are also shown.
+
+    .. note::
+
+        The package `scooby` has to be installed in order to use `Report`:
+        ``pip install scooby``.
+
+
+    Parameters
+    ----------
+    add_pckg : packages, optional
+        Package or list of packages to add to output information (must be
+        imported beforehand).
+
+    ncol : int, optional
+        Number of package-columns in html table (no effect in text-version);
+        Defaults to 3.
+
+    text_width : int, optional
+        The text width for non-HTML display modes
+
+    sort : bool, optional
+        Sort the packages when the report is shown
+
+
+    Examples
+    --------
+    >>> import pytest
+    >>> import dateutil
+    >>> from empymod import Report
+    >>> Report()                            # Default values
+    >>> Report(pytest)                      # Provide additional package
+    >>> Report([pytest, dateutil], ncol=5)  # Set nr of columns
+
+    """
+
+    def __init__(self, add_pckg=None, ncol=3, text_width=80, sort=False):
+        """Initiate a scooby.Report instance."""
+
+        # Mandatory packages.
+        core = ['numpy', 'scipy', 'numba', 'empymod', 'empygrad', 'libdlf']
+
+        # Optional packages.
+        optional = ['IPython', 'matplotlib']
+
+        super().__init__(additional=add_pckg, core=core, optional=optional,
+                         ncol=ncol, text_width=text_width, sort=sort)
