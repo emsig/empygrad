@@ -1,4 +1,4 @@
-"""Installation smoke test for the phase-zero package scaffold."""
+"""Installation smoke test for the package."""
 
 
 def test_package_import():
