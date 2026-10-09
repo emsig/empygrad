@@ -13,7 +13,14 @@ authors = [
     {name = "Wouter Deleersnyder"},
     {name = "The emsig community", email = "info@emsig.xyz"},
 ]
-dependencies = ["empymod~=2.6", "numpy>=2.0", "scipy", "numba", "libdlf", "scooby"]
+dependencies = [
+    "empymod~=2.6",
+    "numpy>=2.0.0",
+    "scipy",
+    "numba",
+    "libdlf",
+    "scooby",
+]
 dynamic = ["version"]
 
 [project.urls]
@@ -22,8 +29,14 @@ Wouter = "https://www.wouterdeleersnyder.be"
 
 [project.optional-dependencies]
 tests = [
-    "pytest", "pytest-cov", "pytest-mpl", "pytest-console-scripts",
-    "flake8", "flake8-pyproject", "vulture", "coveralls",
+    "flake8",
+    "pytest",
+    "coveralls",
+    "pytest_cov",
+    "pytest_mpl",
+    "flake8-pyproject",
+    "pytest-console-scripts",
+    "vulture",
 ]
 
 [tool.setuptools.packages.find]
