@@ -1,39 +1,5 @@
 """
-EM-modelling routines. The implemented routines might not be the fastest
-solution to your specific problem. Use these routines as template to create
-your own, problem-specific modelling routine!
-
-Principal routines:
-
-- :func:`bipole`
-- :func:`dipole`
-
-The main routine is :func:`bipole`, which can model finite-length dipole
-source(s) and dipole receiver(s) of arbitrary direction, for electric or
-magnetic (field or flux) sources and receivers, both in frequency and in time.
-A subset of :func:`bipole` is :func:`dipole`, which models infinitesimal small
-dipoles along the principal axes x, y, and z.
-
-Further routines are:
-
-- :func:`analytical`: Calculate analytical fullspace and halfspace solutions.
-- :func:`dipole_k`: Calculate the electromagnetic wavenumber-domain solution.
-- :func:`gpr`: Calculate the Ground-Penetrating Radar (GPR) response.
-- :func:`ip_and_q`: Calculate in-phase and quadrature responses.
-
-The :func:`dipole_k` routine can be used if you are interested in the
-wavenumber-domain result, without Hankel nor Fourier transform. It calls
-straight the :mod:`empymod.kernel`. The :func:`gpr`-routine convolves the
-frequency-domain result with a wavelet, and applies a gain to the time-domain
-result. This function is still experimental.
-
-The modelling routines make use of the following two core routines:
-
-- :func:`fem`: Calculate wavenumber-domain electromagnetic field and carry out
-  the Hankel transform to the frequency domain.
-- :func:`tem`: Carry out the Fourier transform to time domain after
-  :func:`fem`.
-
+Modelling routines with gradients.
 """
 # Copyright 2016 The emsig community.
 #
@@ -58,7 +24,7 @@ import numpy as np
 
 from empygrad import kernel
 
-from empymod.model import loop, analytical, dipole_k, gpr, ip_and_q, fem, tem
+from empymod.model import fem, tem
 from empymod import transform
 from empymod.utils import (
         check_time, check_time_only, check_model, check_frequency,
@@ -70,8 +36,7 @@ from empymod.utils import (
 _ETA_TYPE_PARAMS = frozenset({"res"})
 _ALL_JAC_PARAMS = frozenset({"res"})
 
-__all__ = ['bipole', 'dipole', 'loop', 'analytical', 'gpr', 'dipole_k',
-           'ip_and_q', 'fem', 'tem']
+__all__ = ['bipole', 'dipole']
 
 
 def __dir__():
