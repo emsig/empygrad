@@ -16,21 +16,17 @@ Modelling routines with gradients.
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
 # License for the specific language governing permissions and limitations under
 # the License.
-import copy
-import warnings
-
 import numpy as np
-
 
 from empygrad import kernel
 
 from empymod.model import fem, tem
 from empymod import transform
 from empymod.utils import (
-        check_time, check_time_only, check_model, check_frequency,
-        check_hankel, check_loop, check_dipole, check_bipole, check_ab,
-        check_solution, get_abs, get_geo_fact, get_azm_dip, get_off_ang,
-        get_layer_nr, get_kwargs, printstartfinish, conv_warning, EMArray)
+        check_time, check_model, check_frequency, check_hankel, check_loop,
+        check_dipole, check_bipole, check_ab, get_abs, get_geo_fact,
+        get_azm_dip, get_off_ang, get_layer_nr, get_kwargs, printstartfinish,
+        conv_warning, EMArray)
 
 
 _ETA_TYPE_PARAMS = frozenset({"res"})
