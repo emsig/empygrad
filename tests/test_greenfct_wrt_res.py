@@ -90,8 +90,7 @@ def _run(ab, msrc, mrec, geom):
     jac_etaH, jac_etaV, _ = _stacked_eta_seeds(
         ['res'], etaH, RES, ANISO, FREQ)
     return greenfct(zsrc, zrec, lsrc, lrec, DEPTH, etaH, etaV, zetaH, zetaV,
-                    LAMBD, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV,
-                    None, None, -1, None, -1, None, None)
+                    LAMBD, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV)
 
 
 @pytest.mark.parametrize("geom", GEOM)

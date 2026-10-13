@@ -53,7 +53,6 @@ def test_fill_jac_Gam_res_fd(TM, mm):
     etaH, etaV, zetaH, zetaV = _eta_zeta(RES)
     jac_etaH, jac_etaV, _ = _stacked_eta_seeds(
         ['res'], etaH, RES, ANISO, FREQ)
-    jac_zero = np.zeros_like(jac_etaH)
 
     Gam = _gam(RES, TM, mm)
     nlay = RES.size
@@ -62,10 +61,9 @@ def test_fill_jac_Gam_res_fd(TM, mm):
     # Same dispatch as in the kernel: always pre-swap values and seeds.
     if TM != mm:  # TM non-MM and TE-MM
         _fill_jac_Gam_TM(jac_Gam, Gam, LAMBD, etaH, etaV, zetaH,
-                         jac_etaH, jac_etaV, jac_zero)
+                         jac_etaH, jac_etaV)
     else:  # TE non-MM and TM-MM
-        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, etaH, zetaH, zetaV,
-                         jac_etaH, jac_zero, jac_zero)
+        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, zetaH, jac_etaH)
 
     for k in range(nlay):
         h = 1e-6*RES[k]

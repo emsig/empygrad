@@ -91,10 +91,9 @@ def _seeds(TM, mm):
     jac_Gam = np.zeros(Gam.shape + (RES.size, ), dtype=Gam.dtype)
     if TM != mm:  # TM non-MM and TE-MM
         _fill_jac_Gam_TM(jac_Gam, Gam, LAMBD, etaH, etaV, zetaH,
-                         jac_etaH, jac_etaV, jac_zero)
+                         jac_etaH, jac_etaV)
     else:  # TE non-MM and TM-MM
-        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, etaH, zetaH, zetaV,
-                         jac_etaH, jac_zero, jac_zero)
+        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, zetaH, jac_etaH)
 
     # e_zH is etaH (TM), zetaH (TE), -zetaH (TM-MM), or -etaH (TE-MM).
     if TM and not mm:
@@ -110,12 +109,10 @@ def _run(TM, mm, ab, lsrc, lrec, zsrc):
     """Return Pu, Pd, jPu, jPd of empygrad.kernel.fields."""
     e_zH, Gam = _primal(RES, TM, mm)
     jac_e_zH, jac_Gam = _seeds(TM, mm)
-    nlay = RES.size
     Rp, Rm, jRp, jRm = reflections(
-        DEPTH, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
-        np.zeros((nlay-1, nlay)))
+        DEPTH, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam)
     return fields(DEPTH, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
-                  jRp, jRm, jac_Gam, np.zeros((3, nlay)))
+                  jRp, jRm, jac_Gam)
 
 
 def _empymod(res, TM, mm, ab, lsrc, lrec, zsrc):
