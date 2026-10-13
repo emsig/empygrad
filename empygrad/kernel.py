@@ -150,10 +150,136 @@ def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
     This function is called from the function :func:`greenfct`.
 
     Primal documentation is inherited from empymod 2.6.
+
+    Jacobian extension (res)
+    ------------------------
+    jac_e_zH : ndarray, shape (nfreq, nlayer, nlayer_res)
+        Derivative of ``e_zH`` w.r.t. the parameters.
+    jac_Gam : ndarray, shape (nfreq, noff, nlayer, nlambda, nlayer_res)
+        Derivative of ``Gam`` w.r.t. the parameters.
+    jac_depth_lower : ndarray
+        Not used (no depth Jacobian).
+
+    Additionally returns jRp, jRm, the derivatives of Rp, Rm, with the
+    parameter axis appended as last dimension.
+
     Resistivity Jacobian: eq. (2.11)–(2.33),
     equations_public.pdf.
     """
-    raise NotImplementedError()
+
+    # Get numbers and max/min layer.
+    nfreq, noff, nlayer, nlambda = Gam.shape
+    nlayer_res = jac_e_zH.shape[2]
+    maxl = max([lrec, lsrc])
+    minl = min([lrec, lsrc])
+
+    # Loop over Rp, Rm
+    for plus in [True, False]:
+
+        # Switches depending if plus or minus
+        if plus:
+            pm = 1
+            layer_count = np.arange(nlayer-2, minl-1, -1)
+            izout = abs(lsrc-lrec)
+            minmax = pm*maxl
+        else:
+            pm = -1
+            layer_count = np.arange(1, maxl+1, 1)
+            izout = 0
+            minmax = pm*minl
+
+        # If rec in last  and rec below src (plus) or
+        # if rec in first and rec above src (minus), shift izout
+        shiftplus = lrec < lsrc and lrec == 0 and not plus
+        shiftminus = lrec > lsrc and lrec == nlayer-1 and plus
+        if shiftplus or shiftminus:
+            izout -= pm
+
+        # Pre-allocate Ref and rloc
+        Ref = np.zeros_like(Gam[:, :, :maxl-minl+1, :])
+        rloc = np.zeros_like(Gam[:, :, 0, :])
+
+        # Pre-allocate their derivatives
+        jRef = np.zeros((nfreq, noff, maxl-minl+1, nlambda, nlayer_res),
+                        dtype=Gam.dtype)
+        jrloc = np.zeros((nfreq, noff, nlambda, nlayer_res), dtype=Gam.dtype)
+
+        # Calculate the reflection
+        for iz in layer_count:
+
+            # Eqs 65, A-12
+            for i in range(nfreq):
+                ra = e_zH[i, iz+pm]
+                rb = e_zH[i, iz]
+                for ii in range(noff):
+                    for iv in range(nlambda):
+                        rloca = ra*Gam[i, ii, iz, iv]
+                        rlocb = rb*Gam[i, ii, iz+pm, iv]
+                        rloc[i, ii, iv] = (rloca - rlocb)/(rloca + rlocb)
+
+                        # eq. (2.13)–(2.16), equations_public.pdf:
+                        # quotient rule on rloc = (a - b)/(a + b).
+                        for k in range(nlayer_res):
+                            jrloca = (jac_e_zH[i, iz+pm, k]*Gam[i, ii, iz, iv]
+                                      + ra*jac_Gam[i, ii, iz, iv, k])
+                            jrlocb = (jac_e_zH[i, iz, k]*Gam[i, ii, iz+pm, iv]
+                                      + rb*jac_Gam[i, ii, iz+pm, iv, k])
+                            jrloc[i, ii, iv, k] = 2*(
+                                    jrloca*rlocb - rloca*jrlocb
+                                    )/(rloca + rlocb)**2
+
+            # In first layer tRef = rloc
+            if iz == layer_count[0]:
+                tRef = rloc.copy()
+                jtRef = jrloc.copy()
+            else:
+                ddepth = depth[iz+1+pm]-depth[iz+pm]
+
+                # Eqs 64, A-11
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            exp2 = np.exp(-2*Gam[i, ii, iz+pm, iv]*ddepth)
+                            term = tRef[i, ii, iv]*exp2
+                            tRef[i, ii, iv] = (rloc[i, ii, iv] + term)/(
+                                    1 + rloc[i, ii, iv]*term)
+
+                            # eq. (2.26)–(2.33), equations_public.pdf
+                            rl = rloc[i, ii, iv]
+                            for k in range(nlayer_res):
+                                jterm = (jtRef[i, ii, iv, k]*exp2 - 2*ddepth *
+                                         jac_Gam[i, ii, iz+pm, iv, k]*term)
+                                jtRef[i, ii, iv, k] = (
+                                        (1 - term*term)*jrloc[i, ii, iv, k] +
+                                        (1 - rl*rl)*jterm)/(1 + rl*term)**2
+
+            # The global reflection coefficient is given back for all layers
+            # between and including src- and rec-layer
+            if lrec != lsrc and pm*iz <= minmax:
+                Ref[:, :, izout, :] = tRef[:]
+                jRef[:, :, izout, :, :] = jtRef[:]
+                izout -= pm
+
+        # If lsrc = lrec, we just store the last values
+        if lsrc == lrec and layer_count.size > 0:
+            out = np.zeros_like(Ref[:, :, :1, :])
+            out[:, :, 0, :] = tRef
+            jout = np.zeros_like(jRef[:, :, :1, :, :])
+            jout[:, :, 0, :, :] = jtRef
+        else:
+            out = Ref
+            jout = jRef
+
+        # Store Ref in Rm/Rp
+        if plus:
+            Rp = out
+            jRp = jout
+        else:
+            Rm = out
+            jRm = jout
+
+    # Return reflections (minus and plus)
+    return Rp, Rm, jRp, jRm
 
 
 @nb.njit(nogil=True, cache=True)
