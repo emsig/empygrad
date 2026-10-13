@@ -29,7 +29,7 @@ root directory for more information regarding the involved licenses.
 # the License.
 
 from empymod import kernel as _empymod_kernel
-from empymod.kernel import angle_factor, fullspace
+from empymod.kernel import angle_factor
 import numpy as np
 import scipy as sp
 import numba as nb
@@ -1172,14 +1172,280 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, etaH, zetaH, zetaV,
                             zH_val*jac_etaH[i, iii, k]/two_G)
 
 
-def _fullspace_derivative(off, angle, zsrc, zrec, etaH, etaV, zetaH, zetaV, ab,
-                          msrc, mrec, jac_etaH, jac_etaV, jac_zetaH, jac_zetaV,
-                          jac_zsrc, jac_zrec):
-    r"""Return ``d(fullspace)/d(param)``, the analytical direct-field Jacobian.
+# Analytical solutions
 
-    Resistivity Jacobian: eq. (2.34)–(2.35), equations_public.pdf.
+@np.errstate(all='ignore')
+def fullspace(off, angle, zsrc, zrec, etaH, etaV, zetaH, zetaV, ab, msrc,
+              mrec, jac_etaH, jac_etaV):
+    r"""Analytical full-space solutions in the frequency domain.
+
+    .. math::
+        :label: fullspace
+
+        \hat{G}^{ee}_{\alpha\beta}, \hat{G}^{ee}_{3\alpha},
+        \hat{G}^{ee}_{33}, \hat{G}^{em}_{\alpha\beta}, \hat{G}^{em}_{\alpha 3}
+
+    This function corresponds to equations 45--50 in [HuTS15]_, and loosely to
+    the corresponding files `Gin11.F90`, `Gin12.F90`, `Gin13.F90`, `Gin22.F90`,
+    `Gin23.F90`, `Gin31.F90`, `Gin32.F90`, `Gin33.F90`, `Gin41.F90`,
+    `Gin42.F90`, `Gin43.F90`, `Gin51.F90`, `Gin52.F90`, `Gin53.F90`,
+    `Gin61.F90`, and `Gin62.F90`.
+
+    This function is called from one of the modelling routines in
+    :mod:`empymod.model`. Consult these modelling routines for a description of
+    the input and output parameters.
+
+    Jacobian extension (res)
+    ------------------------
+    ``jac_etaH`` and ``jac_etaV``, shape (nfreq, nparam), are
+    d(etaH, etaV)/d(param) of the receiver layer. The function returns
+    ``gin, jgin``, where ``jgin``, shape (nfreq, noff, nparam), is the
+    derivative of the direct field in eq. (2.35), equations_public.pdf. The
+    PDF does not give this derivative explicitly; it follows from the
+    product and quotient rule applied to equations 45--51 in [HuTS15]_.
+    Internally, the parameter axis is the first axis of the derivatives, so
+    that they broadcast with the primal arrays.
+
     """
-    raise NotImplementedError()
+    xco = np.cos(angle)*off
+    yco = np.sin(angle)*off
+
+    # Seeds, shape (nparam, nfreq, 1); res does not change zeta.
+    jetaH = jac_etaH.T[..., None]
+    jetaV = jac_etaV.T[..., None]
+    jzetaH = np.zeros_like(jetaH)
+    jzetaV = np.zeros_like(jetaV)
+
+    # Reciprocity switches for magnetic receivers
+    if mrec:
+        if msrc:  # If src is also magnetic, switch eta and zeta (MM => EE).
+            # G^mm_ab(s, r, e, z) = -G^ee_ab(s, r, -z, -e)
+            etaH, zetaH = -zetaH, -etaH
+            etaV, zetaV = -zetaV, -etaV
+            jetaH, jzetaH = -jzetaH, -jetaH
+            jetaV, jzetaV = -jzetaV, -jetaV
+        else:  # If src is electric, swap src and rec (ME => EM).
+            # G^me_ab(s, r, e, z) = -G^em_ba(r, s, e, z)
+            xco *= -1
+            yco *= -1
+            zsrc, zrec = zrec, zsrc
+
+    # Calculate TE/TM-variables
+    if ab not in [16, 26]:                      # Calc TM
+        lGamTM = np.sqrt(zetaH*etaV)
+        RTM = np.sqrt(off*off + ((zsrc-zrec)*(zsrc-zrec)*etaH/etaV)[:, None])
+        uGamTM = np.exp(-lGamTM[:, None]*RTM)/(4*np.pi*RTM *
+                                               np.sqrt(etaH/etaV)[:, None])
+
+        # Derivatives of lGamTM, RTM, and uGamTM (hvTM = etaH/etaV)
+        hvTM = (etaH/etaV)[:, None]
+        jhvTM = (jetaH - hvTM*jetaV)/etaV[:, None]
+        jlGamTM = (jzetaH*etaV[:, None] + zetaH[:, None]*jetaV)/(
+                2*lGamTM[:, None])
+        jRTM = (zsrc-zrec)*(zsrc-zrec)*jhvTM/(2*RTM)
+        juGamTM = -uGamTM*(jlGamTM*RTM + lGamTM[:, None]*jRTM + jRTM/RTM +
+                           jhvTM/(2*hvTM))
+
+    if ab not in [13, 23, 31, 32, 33, 34, 35]:  # Calc TE
+        lGamTE = np.sqrt(zetaV*etaH)
+        RTE = np.sqrt(off*off+(zsrc-zrec)*(zsrc-zrec)*(zetaH/zetaV)[:, None])
+        uGamTE = np.exp(-lGamTE[:, None]*RTE)/(4*np.pi*RTE *
+                                               np.sqrt(zetaH/zetaV)[:, None])
+
+        # Derivatives of lGamTE, RTE, and uGamTE (hvTE = zetaH/zetaV)
+        hvTE = (zetaH/zetaV)[:, None]
+        jhvTE = (jzetaH - hvTE*jzetaV)/zetaV[:, None]
+        jlGamTE = (jzetaV*etaH[:, None] + zetaV[:, None]*jetaH)/(
+                2*lGamTE[:, None])
+        jRTE = (zsrc-zrec)*(zsrc-zrec)*jhvTE/(2*RTE)
+        juGamTE = -uGamTE*(jlGamTE*RTE + lGamTE[:, None]*jRTE + jRTE/RTE +
+                           jhvTE/(2*hvTE))
+
+    # Calculate responses
+    if ab in [11, 12, 21, 22]:  # Eqs 45, 46
+
+        # Define coo1, coo2, and delta
+        if ab in [11, 22]:
+            if ab in [11, ]:
+                coo1 = xco
+                coo2 = xco
+            else:
+                coo1 = yco
+                coo2 = yco
+            delta = 1
+        else:
+            coo1 = xco
+            coo2 = yco
+            delta = 0
+
+        # Calculate response
+        term1 = uGamTM*(3*coo1*coo2/(RTM*RTM) - delta)
+        jterm1 = (juGamTM*(3*coo1*coo2/(RTM*RTM) - delta) -
+                  6*coo1*coo2*uGamTM*jRTM/RTM**3)
+        fac1 = 1/(etaV[:, None]*RTM*RTM) + (lGamTM/etaV)[:, None]/RTM
+        jfac1 = (-(jetaV/etaV[:, None] + 2*jRTM/RTM)/(etaV[:, None]*RTM*RTM) +
+                 (jlGamTM - lGamTM[:, None]*jetaV/etaV[:, None]) /
+                 (etaV[:, None]*RTM) - (lGamTM/etaV)[:, None]*jRTM/(RTM*RTM))
+        jterm1 = jterm1*fac1 + term1*jfac1
+        term1 *= fac1
+        jterm1 += coo1*coo2*((juGamTM*zetaH[:, None] + uGamTM*jzetaH) -
+                             2*uGamTM*zetaH[:, None]*jRTM/RTM)/(RTM*RTM)
+        term1 += uGamTM*zetaH[:, None]*coo1*coo2/(RTM*RTM)
+
+        term2 = -delta*zetaH[:, None]*uGamTE
+        jterm2 = -delta*(jzetaH*uGamTE + zetaH[:, None]*juGamTE)
+
+        term3 = -zetaH[:, None]*coo1*coo2/(off*off)*(uGamTM - uGamTE)
+        jterm3 = -coo1*coo2/(off*off)*(jzetaH*(uGamTM - uGamTE) +
+                                       zetaH[:, None]*(juGamTM - juGamTE))
+
+        term4 = -np.sqrt(zetaH)[:, None]*(2*coo1*coo2/(off*off) - delta)
+        if np.any(zetaH.imag < 0):  # We need the sqrt where Im > 0.
+            term4 *= -1     # This if-statement corrects for it.
+        jterm4 = term4*jzetaH/(2*zetaH[:, None])
+        expTM = np.exp(-lGamTM[:, None]*RTM)
+        expTE = np.exp(-lGamTE[:, None]*RTE)
+        jterm4 = jterm4*(expTM - expTE) + term4*(
+                expTE*(jlGamTE*RTE + lGamTE[:, None]*jRTE) -
+                expTM*(jlGamTM*RTM + lGamTM[:, None]*jRTM))
+        term4 *= expTM - expTE
+        jterm4 -= term4*jetaH/(2*etaH[:, None])
+        jterm4 /= 4*np.pi*np.sqrt(etaH)[:, None]*off*off
+        term4 /= 4*np.pi*np.sqrt(etaH)[:, None]*off*off
+
+        gin = term1 + term2 + term3 + term4
+        jgin = jterm1 + jterm2 + jterm3 + jterm4
+
+    elif ab in [13, 23, 31, 32]:  # Eq 47
+
+        # Define coo
+        if ab in [13, 31]:
+            coo = xco
+        elif ab in [23, 32]:
+            coo = yco
+
+        # Calculate response
+        term1 = (etaH/etaV)[:, None]*(zrec - zsrc)*coo/(RTM*RTM)
+        jterm1 = (zrec - zsrc)*coo*(jhvTM - 2*hvTM*jRTM/RTM)/(RTM*RTM)
+        term2 = 3/(RTM*RTM) + 3*lGamTM[:, None]/RTM + (lGamTM*lGamTM)[:, None]
+        jterm2 = (-6*jRTM/RTM**3 + 3*(jlGamTM - lGamTM[:, None]*jRTM/RTM)/RTM +
+                  2*lGamTM[:, None]*jlGamTM)
+        gin = term1*term2*uGamTM/etaV[:, None]
+        jgin = (((jterm1*term2 + term1*jterm2)*uGamTM +
+                 term1*term2*juGamTM)/etaV[:, None] - gin*jetaV/etaV[:, None])
+
+    elif ab in [33, ]:  # Eq 48
+
+        # Calculate response
+        term1 = (((etaH/etaV)[:, None]*(zsrc - zrec)/RTM) *
+                 ((etaH/etaV)[:, None]*(zsrc - zrec)/RTM) *
+                 (3/(RTM*RTM) + 3*lGamTM[:, None]/RTM +
+                     (lGamTM*lGamTM)[:, None]))
+        fac1 = hvTM*(zsrc - zrec)/RTM
+        jfac1 = (zsrc - zrec)*(jhvTM - hvTM*jRTM/RTM)/RTM
+        fac2 = 3/(RTM*RTM) + 3*lGamTM[:, None]/RTM + (lGamTM*lGamTM)[:, None]
+        jfac2 = (-6*jRTM/RTM**3 + 3*(jlGamTM - lGamTM[:, None]*jRTM/RTM)/RTM +
+                 2*lGamTM[:, None]*jlGamTM)
+        jterm1 = (2*jfac1*fac2 + fac1*jfac2)*fac1
+        term2 = (-(etaH/etaV)[:, None]/RTM*(1/RTM + lGamTM[:, None]) -
+                 (etaH*zetaH)[:, None])
+        jterm2 = (-(jhvTM - hvTM*jRTM/RTM)/RTM*(1/RTM + lGamTM[:, None]) -
+                  hvTM/RTM*(jlGamTM - jRTM/(RTM*RTM)) -
+                  jetaH*zetaH[:, None] - etaH[:, None]*jzetaH)
+        gin = (term1 + term2)*uGamTM/etaV[:, None]
+        jgin = (((jterm1 + jterm2)*uGamTM + (term1 + term2)*juGamTM) /
+                etaV[:, None] - gin*jetaV/etaV[:, None])
+
+    elif ab in [14, 24, 15, 25]:  # Eq 49
+
+        # Define coo1, coo2, coo3, coo4, delta, and pm
+        if ab in [14, 25]:
+            coo1, coo2 = xco, yco
+            coo3, coo4 = xco, yco
+            delta = 0
+            pm = -1
+        elif ab in [24, 15]:
+            coo1, coo2 = yco, yco
+            coo3, coo4 = xco, xco
+            delta = 1
+            pm = 1
+
+        # 15/25: Swap x/y
+        if ab in [15, 25]:
+            coo1, coo3 = coo3, coo1
+            coo2, coo4 = coo4, coo2
+
+        # 24/25: Swap src/rec
+        if ab in [24, 25]:
+            zrec, zsrc = zsrc, zrec
+
+        # Calculate response
+        def term(lGam, z_eH, z_eV, R, off, co1, co2):
+            fac = (lGam*z_eH/z_eV)[:, None]/R*np.exp(-lGam[:, None]*R)
+            term = 2/(off*off) + lGam[:, None]/R + 1/(R*R)
+            return fac*(co1*co2*term - delta)
+
+        def jterm(lGam, z_eH, z_eV, R, off, co1, co2, jlGam, jz_eH, jz_eV,
+                  jR):
+            """Derivative of term()."""
+            fac = (lGam*z_eH/z_eV)[:, None]/R*np.exp(-lGam[:, None]*R)
+            jfac = fac*(jlGam/lGam[:, None] + jz_eH/z_eH[:, None] -
+                        jz_eV/z_eV[:, None] - jR/R - jlGam*R -
+                        lGam[:, None]*jR)
+            term = 2/(off*off) + lGam[:, None]/R + 1/(R*R)
+            jterm = jlGam/R - lGam[:, None]*jR/(R*R) - 2*jR/R**3
+            return jfac*(co1*co2*term - delta) + fac*co1*co2*jterm
+
+        termTM = term(lGamTM, etaH, etaV, RTM, off, coo1, coo2)
+        termTE = term(lGamTE, zetaH, zetaV, RTE, off, coo3, coo4)
+        jtermTM = jterm(lGamTM, etaH, etaV, RTM, off, coo1, coo2, jlGamTM,
+                        jetaH, jetaV, jRTM)
+        jtermTE = jterm(lGamTE, zetaH, zetaV, RTE, off, coo3, coo4, jlGamTE,
+                        jzetaH, jzetaV, jRTE)
+        mult = (zrec - zsrc)/(4*np.pi*np.sqrt(etaH*zetaH)[:, None]*off*off)
+        jmult = -mult*(jetaH/etaH[:, None] + jzetaH/zetaH[:, None])/2
+        gin = -mult*(pm*termTM + termTE)
+        jgin = -jmult*(pm*termTM + termTE) - mult*(pm*jtermTM + jtermTE)
+
+    elif ab in [34, 35, 16, 26]:  # Eqs 50, 51
+
+        # Define coo
+        if ab in [34, 16]:
+            coo = yco
+        else:
+            coo = -xco
+
+        # Define R, lGam, uGam, e_zH, and e_zV
+        if ab in [34, 35]:
+            coo *= -1
+            R = RTM
+            lGam = lGamTM
+            uGam = uGamTM
+            e_zH = etaH
+            e_zV = etaV
+            jR, jlGam, juGam, jhv = jRTM, jlGamTM, juGamTM, jhvTM
+        else:
+            R = RTE
+            lGam = lGamTE
+            uGam = uGamTE
+            e_zH = zetaH
+            e_zV = zetaV
+            jR, jlGam, juGam, jhv = jRTE, jlGamTE, juGamTE, jhvTE
+
+        # Calculate response
+        gin = coo*(e_zH/e_zV)[:, None]/R*(lGam[:, None] + 1/R)*uGam
+        hv = (e_zH/e_zV)[:, None]
+        jgin = coo*((jhv - hv*jR/R)/R*(lGam[:, None] + 1/R)*uGam +
+                    hv/R*(jlGam - jR/(R*R))*uGam +
+                    hv/R*(lGam[:, None] + 1/R)*juGam)
+
+    # If rec is magnetic switch sign (reciprocity MM/ME => EE/EM).
+    if mrec:
+        gin *= -1
+        jgin *= -1
+
+    # Derivatives with the parameter axis last: (nfreq, noff, nparam).
+    return gin, np.moveaxis(jgin, 0, -1)
 
 
 def greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
