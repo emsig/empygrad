@@ -1446,39 +1446,3 @@ def fullspace(off, angle, zsrc, zrec, etaH, etaV, zetaH, zetaV, ab, msrc,
 
     # Derivatives with the parameter axis last: (nfreq, noff, nparam).
     return gin, np.moveaxis(jgin, 0, -1)
-
-
-def greenfct_numpy(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-                   lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV,
-                   jac_zetaH=None, jac_zetaV=None, jac_depth_lower=None,
-                   jac_src_z_indicator=None, src_z_col=-1,
-                   jac_rec_z_indicator=None, rec_z_col=-1):
-    r"""Pure-numpy Green's function with Jacobian (no jac_mode branching).
-
-    Reading reference; not used in production. Verified by the oracle test.
-    Resistivity Jacobian: eq. (2.41), (2.75), (2.84),
-    equations_public.pdf.
-    """
-    raise NotImplementedError()
-
-
-def reflections_numpy(depth, e_zH, Gam, lrec, lsrc, jac_e_zH=None,
-                      jac_Gam=None, jac_depth_lower=None):
-    r"""Pure-numpy fallback for reflections (used in tests / reference checks).
-
-    Reading reference; not used in production. Verified by the oracle test.
-    Resistivity Jacobian: eq. (2.11)–(2.33),
-    equations_public.pdf.
-    """
-    raise NotImplementedError()
-
-
-def fields_numpy(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
-                 jac_Rp=None, jac_Rm=None, jac_Gam=None, jac_dists=None):
-    r"""Pure-numpy fallback for fields (used in tests / reference checks).
-
-    Reading reference; not used in production. Verified by the oracle test.
-    Resistivity Jacobian: eq. (2.44)–(2.93),
-    equations_public.pdf.
-    """
-    raise NotImplementedError()
