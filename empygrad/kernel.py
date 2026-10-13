@@ -186,9 +186,38 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
                      jac_etaH, jac_etaV, jac_zetaH):
     r"""Fill jac_Gam in-place for the TM non-MM case (explicit scalar loops).
 
+    Implements d(Gam)/d(p) = d(Gam^2)/d(p) / (2 Gam), with
+    Gam^2 = (etaH/etaV) lambd^2 + zetaH etaH:
+
+    - d(Gam^2)/d(etaH) = lambd^2/etaV + zetaH,
+    - d(Gam^2)/d(etaV) = -etaH lambd^2/etaV^2.
+
+    Also used for TE-MM, which is identical in form to TM with the pre-swap
+    etaH/etaV/zetaH values.
+
+    jac_Gam has shape (nfreq, noff, nlayer, nlambda, nlayer_res).
+
     Resistivity Jacobian: eq. (2.17)–(2.20), equations_public.pdf.
     """
-    raise NotImplementedError()
+    nfreq, noff, nlayer, nlambda, nlayer_res = jac_Gam.shape
+    for i in range(nfreq):
+        for iii in range(nlayer):
+            zH_val = zetaH[i, iii]
+            eH_val = etaH[i, iii]
+            eV_val = etaV[i, iii]
+            eV_sq = eV_val*eV_val
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    lamsq = lambd[ii, iv]*lambd[ii, iv]
+                    two_G = 2.0*Gam[i, ii, iii, iv]
+                    for k in range(nlayer_res):
+                        jH = jac_etaH[i, iii, k]
+                        jV = jac_etaV[i, iii, k]
+                        # eq. (2.18) and (2.20), equations_public.pdf
+                        jac_Gam[i, ii, iii, iv, k] = (
+                            (jH/eV_val - eH_val*jV/eV_sq)*lamsq
+                            + zH_val*jH
+                        )/two_G
 
 
 @nb.njit(**_numba_setting)
@@ -196,9 +225,27 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, etaH, zetaH, zetaV,
                      jac_etaH, jac_zetaH, jac_zetaV):
     r"""Fill jac_Gam in-place for the TE non-MM and TM-MM cases.
 
-    Resistivity Jacobian: eq. (2.21), equations_public.pdf.
+    Implements d(Gam)/d(p) = d(Gam^2)/d(p) / (2 Gam), with
+    Gam^2 = (zetaH/zetaV) lambd^2 + zetaH etaH:
+
+    - d(Gam^2)/d(etaH) = zetaH,
+    - d(Gam^2)/d(etaV) = 0.
+
+    jac_Gam has shape (nfreq, noff, nlayer, nlambda, nlayer_res).
+
+    Resistivity Jacobian: eq. (2.19), (2.21), equations_public.pdf.
     """
-    raise NotImplementedError()
+    nfreq, noff, nlayer, nlambda, nlayer_res = jac_Gam.shape
+    for i in range(nfreq):
+        for iii in range(nlayer):
+            zH_val = zetaH[i, iii]
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    two_G = 2.0*Gam[i, ii, iii, iv]
+                    for k in range(nlayer_res):
+                        # eq. (2.19) and (2.21), equations_public.pdf
+                        jac_Gam[i, ii, iii, iv, k] = (
+                            zH_val*jac_etaH[i, iii, k]/two_G)
 
 
 @nb.njit(**_numba_setting)
