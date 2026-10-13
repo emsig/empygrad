@@ -406,10 +406,23 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
     gradient : bool, default: False
         If True, additionally return the Jacobian with respect to the layer
         resistivities, using the analytical derivative eq. (2.5)–(2.101),
-        equations_public.pdf. Not yet implemented.
+        equations_public.pdf. The function then returns ``(EM, J)``, where
+        ``J`` is an ndarray of shape ``EM.shape + (nlayer, )``, and
+        ``J[..., k]`` is the derivative of EM with respect to ``res[k]``.
+
+        The integration over the finite dipoles, the geometrical factors, and
+        the scaling with strength and lengths are linear, so they apply to the
+        Jacobian of the point dipoles as to the field. Current-density
+        receivers (``mrec='j'``) scale the field with etaH of the receiver
+        layer, which depends on res (product rule). The magnetic-flux factor
+        zetaH does not depend on res.
+
+        For ``ht='dlf'``, the Jacobian uses the same DLF as EM (standard,
+        lagged, or splined); for ``ht='qwe'`` and ``ht='quad'``, it uses the
+        default DLF. Not implemented for a user-defined ``res`` dict nor for
+        a ``bandpass`` function.
     """
-    if gradient:
-        raise NotImplementedError("gradient=True is not implemented yet.")
+    jac_params = _parse_jac(gradient)
 
     # Get kwargs with defaults.
     out = get_kwargs(
@@ -420,6 +433,13 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
         [2, 'dlf', {}, 'dlf', {}, False, None, True, None], kwargs,
     )
     verb, ht, htarg, ft, ftarg, xdirect, loop, squeeze, bandpass = out
+
+    if jac_params is not None and (
+            isinstance(res, dict) or
+            (isinstance(bandpass, dict) and 'func' in bandpass)):
+        raise NotImplementedError(
+            "gradient=True is not implemented for a user-defined `res` dict "
+            "nor for a `bandpass` function.")
 
     # === 1.  LET'S START ============
     t0 = printstartfinish(verb)
@@ -467,6 +487,13 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
     # Pre-allocate output EM array
     EM = np.zeros((freq.size, nrec*nsrc), dtype=etaH.dtype)
 
+    # Jacobian w.r.t. res: seeds, and output array with the parameter axis
+    # first, such that it broadcasts as EM (moved to the end at the end)
+    if jac_params is not None:
+        jac_etaH, jac_etaV, _ = _stacked_eta_seeds(
+            jac_params, etaH, res, aniso, freq)
+        jEM = np.zeros((jac_etaH.shape[-1], ) + EM.shape, dtype=etaH.dtype)
+
     # Initialize kernel count, conv (only for QWE)
     # (how many times the wavenumber-domain kernel was calld)
     kcount = 0
@@ -504,6 +531,8 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
             # Pre-allocate temporary source-EM array for integration loop
             sEM = np.zeros((freq.size, isrz), dtype=etaH.dtype)
+            if jac_params is not None:
+                jsEM = np.zeros((jEM.shape[0], ) + sEM.shape, dtype=etaH.dtype)
 
             for isg in range(srcpts):  # Loop over src integration points
 
@@ -516,6 +545,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
                 # Pre-allocate temporary receiver EM arrays for integr. loop
                 rEM = np.zeros((freq.size, isrz), dtype=etaH.dtype)
+                if jac_params is not None:
+                    jrEM = np.zeros((jEM.shape[0], ) + rEM.shape,
+                                    dtype=etaH.dtype)
 
                 for irg in range(recpts):  # Loop over rec integration pts
                     # Note, if source or receiver is a dipole, but horizontal
@@ -539,6 +571,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
                     # Pre-allocate temporary EM array for ab-loop
                     abEM = np.zeros((freq.size, isrz), dtype=etaH.dtype)
+                    if jac_params is not None:
+                        jabEM = np.zeros((jEM.shape[0], ) + abEM.shape,
+                                         dtype=etaH.dtype)
 
                     for iab in ab_calc:  # Loop over required ab's
 
@@ -553,6 +588,10 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
                         # Add field to EM with geometrical factor
                         abEM += out[0]*tfact.ravel('F')
+                        if jac_params is not None:
+                            jfEM = _fem_jac_columns(
+                                iab, *finp[:-1], jac_etaH, jac_etaV)
+                            jabEM += np.moveaxis(jfEM, -1, 0)*tfact.ravel('F')
 
                         # Update kernel count
                         kcount += out[1]
@@ -565,6 +604,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
                         # Check eta at receiver level (only isotropic impl.).
                         if verb > 0 and etaH[0, lrec] != etaV[0, lrec]:
                             warn_ecurrent = True
+                        if jac_params is not None:  # Product rule
+                            jabEM *= etaH[:, lrec, None]
+                            jabEM += abEM*jac_etaH[:, lrec, :].T[..., None]
                         abEM *= etaH[:, lrec, None]
 
                     # Multiply with zeta of the rec-layer if flux.
@@ -573,9 +615,13 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
                         if verb > 0 and zetaH[0, lrec] != zetaV[0, lrec]:
                             warn_rec_flux = True
                         abEM *= zetaH[:, lrec, None]
+                        if jac_params is not None:
+                            jabEM *= zetaH[:, lrec, None]
 
                     # Add this receiver element, with weight from integration
                     rEM += abEM*recg_w[irg]
+                    if jac_params is not None:
+                        jrEM += jabEM*recg_w[irg]
 
                 # Multiply with zeta of the src-layer if flux.
                 if stype == 'b':
@@ -583,9 +629,13 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
                     if verb > 0 and zetaH[0, lsrc] != zetaV[0, lsrc]:
                         warn_src_flux = True
                     rEM *= zetaH[:, lsrc, None]
+                    if jac_params is not None:
+                        jrEM *= zetaH[:, lsrc, None]
 
                 # Add this source element, with weight from integration
                 sEM += rEM*srcg_w[isg]
+                if jac_params is not None:
+                    jsEM += jrEM*srcg_w[isg]
 
             # Scale signal for src-strength and src/rec-lengths
             src_rec_w = 1
@@ -593,18 +643,28 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
                 src_rec_w *= np.repeat(src_w, irec)
                 src_rec_w *= np.tile(rec_w, isrc)
             sEM *= src_rec_w
+            if jac_params is not None:
+                jsEM *= src_rec_w
 
             # Add this src-rec signal
             if nrec == nrecz:
                 if nsrc == nsrcz:  # Case 1: Looped over each src and each rec
                     EM[:, isz*nrec+irz:isz*nrec+irz+1] = sEM
+                    if jac_params is not None:
+                        jEM[:, :, isz*nrec+irz:isz*nrec+irz+1] = jsEM
                 else:              # Case 2: Looped over each rec
                     EM[:, irz:nsrc*nrec:nrec] = sEM
+                    if jac_params is not None:
+                        jEM[:, :, irz:nsrc*nrec:nrec] = jsEM
             else:
                 if nsrc == nsrcz:  # Case 3: Looped over each src
                     EM[:, isz*nrec:nrec*(isz+1)] = sEM
+                    if jac_params is not None:
+                        jEM[:, :, isz*nrec:nrec*(isz+1)] = jsEM
                 else:              # Case 4: All in one go
                     EM = sEM
+                    if jac_params is not None:
+                        jEM = jsEM
 
     # In case of QWE/QUAD, print Warning if not converged
     conv_warning(conv, htarg, 'Hankel', verb)
@@ -616,6 +676,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
     # Do f->t transform if required
     if signal is not None:
         EM, conv = tem(EM, EM[0, :], freq, time, signal, ft, ftarg)
+        if jac_params is not None:  # The f->t transform is linear.
+            jEM = np.stack([tem(jEMk, jEMk[0, :], freq, time, signal, ft,
+                                ftarg)[0] for jEMk in jEM])
 
         # In case of QWE/QUAD, print Warning if not converged
         conv_warning(conv, ftarg, 'Fourier', verb)
@@ -624,6 +687,11 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
     EM = EM.reshape((-1, nrec, nsrc), order='F')
     if squeeze:
         EM = np.squeeze(EM)
+
+    # Reshape the Jacobian such that J[..., k] has the shape of EM
+    if jac_params is not None:
+        jEM = jEM.reshape((jEM.shape[0], -1, nrec, nsrc), order='F')
+        jEM = np.moveaxis(jEM, 0, -1).reshape(EM.shape + (jEM.shape[0], ))
 
     # Raise warnings
     if verb > 0:
@@ -639,6 +707,9 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
     # === 4.  FINISHED ============
     printstartfinish(verb, t0, kcount)
+
+    if jac_params is not None:
+        return EMArray(EM), jEM
 
     return EMArray(EM)
 
@@ -1123,11 +1194,3 @@ def _hankel_dlf_jac(zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab, etaH,
             ang_fact=ang_fact, ab=ab, int_pts=int_pts)
 
     return jfEM
-
-
-def _build_bipole_jac_seeds(jac_params, etaH, res, aniso, freq, n_interfaces):
-    r"""Assemble the position-independent unified kernel-seed arrays for the
-
-    Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
-    """
-    raise NotImplementedError()
