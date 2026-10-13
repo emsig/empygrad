@@ -45,7 +45,8 @@ def __dir__():
 
 def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
            epermH=None, epermV=None, mpermH=None, mpermV=None, msrc=False,
-           srcpts=1, mrec=False, recpts=1, strength=0, jac=None, **kwargs):
+           srcpts=1, mrec=False, recpts=1, strength=0, gradient=False,
+           **kwargs):
     r"""Return EM fields due to arbitrary rotated, finite length EM dipoles.
 
     Calculate the electromagnetic frequency- or time-domain field due to
@@ -402,14 +403,248 @@ def bipole(src, rec, depth, res, freqtime, signal=None, aniso=None,
 
     Jacobian extension (res)
     ------------------------
-    With ``jac="res"``, the analytical derivative eq. (2.5)–(2.101) is used,
-    equations_public.pdf.
+    gradient : bool, default: False
+        If True, additionally return the Jacobian with respect to the layer
+        resistivities, using the analytical derivative eq. (2.5)–(2.101),
+        equations_public.pdf. Not yet implemented.
     """
-    raise NotImplementedError()
+    if gradient:
+        raise NotImplementedError("gradient=True is not implemented yet.")
+
+    # Get kwargs with defaults.
+    out = get_kwargs(
+        [
+            'verb', 'ht', 'htarg', 'ft', 'ftarg', 'xdirect', 'loop', 'squeeze',
+            'bandpass',
+        ],
+        [2, 'dlf', {}, 'dlf', {}, False, None, True, None], kwargs,
+    )
+    verb, ht, htarg, ft, ftarg, xdirect, loop, squeeze, bandpass = out
+
+    # === 1.  LET'S START ============
+    t0 = printstartfinish(verb)
+
+    # === 2.  CHECK INPUT ============
+
+    # Check times and Fourier Transform arguments and get required frequencies
+    if signal is None:
+        freq = freqtime
+    else:
+        outtime = check_time(freqtime, signal, ft, ftarg, verb, new=True)
+        time, freq, ft, ftarg, signal = outtime
+
+    # Check layer parameters
+    model = check_model(depth, res, aniso, epermH, epermV, mpermH, mpermV,
+                        xdirect, verb)
+    depth, res, aniso, epermH, epermV, mpermH, mpermV, isfullspace = model
+
+    # Check frequency => get etaH, etaV, zetaH, and zetaV
+    frequency = check_frequency(freq, res, aniso, epermH, epermV, mpermH,
+                                mpermV, verb)
+    freq, etaH, etaV, zetaH, zetaV = frequency
+
+    # Update etaH/etaV and zetaH/zetaV according to user-provided model
+    if isinstance(res, dict) and 'func_eta' in res:
+        etaH, etaV = res['func_eta'](res, locals())
+    if isinstance(res, dict) and 'func_zeta' in res:
+        zetaH, zetaV = res['func_zeta'](res, locals())
+
+    # Check Hankel transform parameters
+    ht, htarg = check_hankel(ht, htarg, verb)
+
+    # Check loop
+    loop_freq, loop_off = check_loop(loop, ht, htarg, verb)
+
+    # Check src and rec, get flags if dipole or not
+    # nsrcz/nrecz are number of unique src/rec-pole depths
+    source = check_bipole(src, 'src', msrc, verb)
+    src, nsrc, nsrcz, srcdipole, msrc, stype = source
+    receiver = check_bipole(rec, 'rec', mrec, verb)
+    rec, nrec, nrecz, recdipole, mrec, rtype = receiver
+
+    # === 3. EM-FIELD CALCULATION ============
+
+    # Pre-allocate output EM array
+    EM = np.zeros((freq.size, nrec*nsrc), dtype=etaH.dtype)
+
+    # Initialize kernel count, conv (only for QWE)
+    # (how many times the wavenumber-domain kernel was calld)
+    kcount = 0
+    conv = True
+
+    # Define some indices
+    isrc = int(nsrc/nsrcz)  # this is either 1 or nsrc
+    irec = int(nrec/nrecz)  # this is either 1 or nrec
+    isrz = int(isrc*irec)   # this is either 1, nsrc, nrec, or nsrc*nrec
+
+    # Warn flags
+    warn_ecurrent = False
+    warn_src_flux = False
+    warn_rec_flux = False
+
+    # The kernel handles only 1 ab with one srcz-recz combination at once.
+    # Hence we have to loop over every different depth of src or rec, and
+    # over all required ab's.
+    for isz in range(nsrcz):  # Loop over source depths
+
+        # Get this source
+        srcazmdip = get_azm_dip(src, isz, nsrcz, srcpts, srcdipole, strength,
+                                'src', verb)
+        tsrc, srcazm, srcdip, srcg_w, srcpts, src_w = srcazmdip
+
+        for irz in range(nrecz):  # Loop over receiver depths
+
+            # Get this receiver
+            recazmdip = get_azm_dip(rec, irz, nrecz, recpts, recdipole,
+                                    strength, 'rec', verb)
+            trec, recazm, recdip, recg_w, recpts, rec_w = recazmdip
+
+            # Get required ab's
+            ab_calc = get_abs(msrc, mrec, srcazm, srcdip, recazm, recdip, verb)
+
+            # Pre-allocate temporary source-EM array for integration loop
+            sEM = np.zeros((freq.size, isrz), dtype=etaH.dtype)
+
+            for isg in range(srcpts):  # Loop over src integration points
+
+                # This integration source
+                tisrc = [tsrc[0][isg::srcpts], tsrc[1][isg::srcpts],
+                         tsrc[2][isg]]
+
+                # Get layer number in which src resides
+                lsrc, zsrc = get_layer_nr(tisrc, depth)
+
+                # Pre-allocate temporary receiver EM arrays for integr. loop
+                rEM = np.zeros((freq.size, isrz), dtype=etaH.dtype)
+
+                for irg in range(recpts):  # Loop over rec integration pts
+                    # Note, if source or receiver is a dipole, but horizontal
+                    # (dip=0), then calculation could be sped up by not looping
+                    # over the dipole elements, but calculate it all in one go.
+
+                    # This integration receiver
+                    tirec = [trec[0][irg::recpts], trec[1][irg::recpts],
+                             trec[2][irg]]
+
+                    # Get src-rec offsets and angles
+                    off, angle = get_off_ang(tisrc, tirec, isrc, irec, verb)
+
+                    # Get layer number in which rec resides
+                    lrec, zrec = get_layer_nr(tirec, depth)
+
+                    # Gather variables
+                    finp = (off, angle, zsrc, zrec, lsrc, lrec, depth, freq,
+                            etaH, etaV, zetaH, zetaV, xdirect, isfullspace, ht,
+                            htarg, msrc, mrec, loop_freq, loop_off, conv)
+
+                    # Pre-allocate temporary EM array for ab-loop
+                    abEM = np.zeros((freq.size, isrz), dtype=etaH.dtype)
+
+                    for iab in ab_calc:  # Loop over required ab's
+
+                        # Carry-out the frequency-domain calculation
+                        out = fem(iab, *finp)
+
+                        # Get geometrical scaling factor,
+                        # broadcast to (irec, isrc)
+                        tfact = np.ones((irec, isrc))*get_geo_fact(
+                            iab, srcazm, srcdip, recazm, recdip, msrc, mrec
+                        )
+
+                        # Add field to EM with geometrical factor
+                        abEM += out[0]*tfact.ravel('F')
+
+                        # Update kernel count
+                        kcount += out[1]
+
+                        # Update conv (QWE convergence)
+                        conv *= out[2]
+
+                    # Multiply with eta of the rec-layer if ecurrent.
+                    if rtype == 'j':
+                        # Check eta at receiver level (only isotropic impl.).
+                        if verb > 0 and etaH[0, lrec] != etaV[0, lrec]:
+                            warn_ecurrent = True
+                        abEM *= etaH[:, lrec, None]
+
+                    # Multiply with zeta of the rec-layer if flux.
+                    elif rtype == 'b':
+                        # Check zeta at receiver level (only isotropic impl.).
+                        if verb > 0 and zetaH[0, lrec] != zetaV[0, lrec]:
+                            warn_rec_flux = True
+                        abEM *= zetaH[:, lrec, None]
+
+                    # Add this receiver element, with weight from integration
+                    rEM += abEM*recg_w[irg]
+
+                # Multiply with zeta of the src-layer if flux.
+                if stype == 'b':
+                    # Check zeta at source level (only isotropic impl.).
+                    if verb > 0 and zetaH[0, lsrc] != zetaV[0, lsrc]:
+                        warn_src_flux = True
+                    rEM *= zetaH[:, lsrc, None]
+
+                # Add this source element, with weight from integration
+                sEM += rEM*srcg_w[isg]
+
+            # Scale signal for src-strength and src/rec-lengths
+            src_rec_w = 1
+            if strength > 0:
+                src_rec_w *= np.repeat(src_w, irec)
+                src_rec_w *= np.tile(rec_w, isrc)
+            sEM *= src_rec_w
+
+            # Add this src-rec signal
+            if nrec == nrecz:
+                if nsrc == nsrcz:  # Case 1: Looped over each src and each rec
+                    EM[:, isz*nrec+irz:isz*nrec+irz+1] = sEM
+                else:              # Case 2: Looped over each rec
+                    EM[:, irz:nsrc*nrec:nrec] = sEM
+            else:
+                if nsrc == nsrcz:  # Case 3: Looped over each src
+                    EM[:, isz*nrec:nrec*(isz+1)] = sEM
+                else:              # Case 4: All in one go
+                    EM = sEM
+
+    # In case of QWE/QUAD, print Warning if not converged
+    conv_warning(conv, htarg, 'Hankel', verb)
+
+    # Apply user-provided bandpass filter
+    if isinstance(bandpass, dict) and 'func' in bandpass:
+        bandpass['func'](bandpass, locals())
+
+    # Do f->t transform if required
+    if signal is not None:
+        EM, conv = tem(EM, EM[0, :], freq, time, signal, ft, ftarg)
+
+        # In case of QWE/QUAD, print Warning if not converged
+        conv_warning(conv, ftarg, 'Fourier', verb)
+
+    # Reshape for number of sources
+    EM = EM.reshape((-1, nrec, nsrc), order='F')
+    if squeeze:
+        EM = np.squeeze(EM)
+
+    # Raise warnings
+    if verb > 0:
+        if warn_ecurrent:
+            print("* WARNING :: `etaH != etaV` at receiver level, "
+                  "only `etaH` considered for e-current density.")
+        if warn_src_flux:
+            print("* WARNING :: `zetaH != zetaV` at source level, "
+                  "only `zetaH` considered for magnetic flux.")
+        if warn_rec_flux:
+            print("* WARNING :: `zetaH != zetaV` at receiver level, "
+                  "only `zetaH` considered for magnetic flux.")
+
+    # === 4.  FINISHED ============
+    printstartfinish(verb, t0, kcount)
+
+    return EMArray(EM)
 
 
 def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
-           epermH=None, epermV=None, mpermH=None, mpermV=None, jac=None,
+           epermH=None, epermV=None, mpermH=None, mpermV=None, gradient=False,
            **kwargs):
     r"""Return EM fields due to infinitesimal small EM dipoles.
 
@@ -579,8 +814,10 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
 
     Jacobian extension (res)
     ------------------------
-    With ``jac="res"``, the analytical derivative eq. (2.5)–(2.101) is used,
-    equations_public.pdf.
+    gradient : bool, default: False
+        If True, additionally return the Jacobian with respect to the layer
+        resistivities, using the analytical derivative eq. (2.5)–(2.101),
+        equations_public.pdf. Not yet implemented.
     """
     def _run_wavenumber(eH, eV, zH, zV, lmbd, jH, jV, jzH, jzV):
         """Collect kernel columns; eq. (2.41), equations_public.pdf."""
@@ -590,7 +827,100 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         """Transform Jacobian columns; eq. (2.41), equations_public.pdf."""
         raise NotImplementedError()
 
-    raise NotImplementedError()
+    if gradient:
+        raise NotImplementedError("gradient=True is not implemented yet.")
+
+    # Get kwargs with defaults.
+    out = get_kwargs(
+        [
+            'verb', 'ht', 'htarg', 'ft', 'ftarg', 'xdirect', 'loop', 'squeeze',
+            'bandpass',
+        ],
+        [2, 'dlf', {}, 'dlf', {}, False, None, True, None], kwargs,
+    )
+    verb, ht, htarg, ft, ftarg, xdirect, loop, squeeze, bandpass = out
+
+    # === 1.  LET'S START ============
+    t0 = printstartfinish(verb)
+
+    # === 2.  CHECK INPUT ============
+
+    # Check times and Fourier Transform arguments, get required frequencies
+    # (freq = freqtime if `signal=None`)
+    if signal is not None:
+        out = check_time(freqtime, signal, ft, ftarg, verb, True)
+        time, freq, ft, ftarg, signal = out
+    else:
+        freq = freqtime
+
+    # Check layer parameters
+    model = check_model(depth, res, aniso, epermH, epermV, mpermH, mpermV,
+                        xdirect, verb)
+    depth, res, aniso, epermH, epermV, mpermH, mpermV, isfullspace = model
+
+    # Check frequency => get etaH, etaV, zetaH, and zetaV
+    frequency = check_frequency(freq, res, aniso, epermH, epermV, mpermH,
+                                mpermV, verb)
+    freq, etaH, etaV, zetaH, zetaV = frequency
+
+    # Update etaH/etaV and zetaH/zetaV according to user-provided model
+    if isinstance(res, dict) and 'func_eta' in res:
+        etaH, etaV = res['func_eta'](res, locals())
+    if isinstance(res, dict) and 'func_zeta' in res:
+        zetaH, zetaV = res['func_zeta'](res, locals())
+
+    # Check Hankel transform parameters
+    ht, htarg = check_hankel(ht, htarg, verb)
+
+    # Check loop
+    loop_freq, loop_off = check_loop(loop, ht, htarg, verb)
+
+    # Check src-rec configuration
+    # => Get flags if src or rec or both are magnetic (msrc, mrec)
+    ab_calc, msrc, mrec = check_ab(ab, verb)
+
+    # Check src and rec
+    src, nsrc = check_dipole(src, 'src', verb)
+    rec, nrec = check_dipole(rec, 'rec', verb)
+
+    # Get offsets and angles (off, angle)
+    off, angle = get_off_ang(src, rec, nsrc, nrec, verb)
+
+    # Get layer number in which src and rec reside (lsrc/lrec)
+    lsrc, zsrc = get_layer_nr(src, depth)
+    lrec, zrec = get_layer_nr(rec, depth)
+
+    # === 3. EM-FIELD CALCULATION ============
+
+    # Collect variables for fem
+    inp = (ab_calc, off, angle, zsrc, zrec, lsrc, lrec, depth, freq, etaH,
+           etaV, zetaH, zetaV, xdirect, isfullspace, ht, htarg, msrc, mrec,
+           loop_freq, loop_off)
+    EM, kcount, conv = fem(*inp)
+
+    # In case of QWE/QUAD, print Warning if not converged
+    conv_warning(conv, htarg, 'Hankel', verb)
+
+    # Apply user-provided bandpass filter
+    if isinstance(bandpass, dict) and 'func' in bandpass:
+        bandpass['func'](bandpass, locals())
+
+    # Do f->t transform if required
+    if signal is not None:
+        EM, conv = tem(EM, off, freq, time, signal, ft, ftarg)
+
+        # In case of QWE/QUAD, print Warning if not converged
+        conv_warning(conv, ftarg, 'Fourier', verb)
+
+    # Reshape for number of sources
+    EM = EM.reshape((-1, nrec, nsrc), order='F')
+    if squeeze:
+        EM = np.squeeze(EM)
+
+    # === 4.  FINISHED ============
+    printstartfinish(verb, t0, kcount)
+
+    return EMArray(EM)
 
 
 def _parse_jac(jac):
