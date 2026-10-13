@@ -7,6 +7,8 @@ validated against central finite differences of the empymod reflections and
 fields, with the seeds of `_stacked_eta_seeds`, `_fill_jac_Gam_TM/TE`, and
 `reflections` as input.
 """
+import sys
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -38,7 +40,17 @@ LAYERS = [
     (4, 1, 1100.),   # rec above src, nlsr > 2
     (5, 2, 1400.),   # rec above src, src in bottom layer
     (2, 1, 300.),    # rec above src, adjacent layer
+    (1, 0, 100.),    # rec above src, rec in top layer (air)
+    (3, 0, 700.),    # rec above src, rec in top layer (air), nlsr > 2
 ]
+
+# For a receiver in the air, TM has Rm ~ -1 at the air interface, and the
+# primal contains 1 + Rm ~ 1e-8. The round-off error of a double-precision
+# FD of it decreases with 1/h, and is large for small steps. These cases use
+# a fourth-order FD with a larger step and a relaxed rtol (the analytical
+# derivative is not affected); the same geometries are tested strictly with
+# a conductive top layer.
+ILL_CONDITIONED = [(1, 0, 100.), (3, 0, 700.)]
 
 # (TM, mm): mm = magnetic source and receiver.
 MODES = [(True, False), (False, False), (True, True), (False, True)]
@@ -128,25 +140,57 @@ def test_primal_matches_empymod(ab, TM, mm, lsrc, lrec, zsrc):
     assert jPd.shape == Pd.shape + (RES.size, )
 
 
+def _check_fd(ab, TM, mm, lsrc, lrec, zsrc, ill):
+    """Compare jPu, jPd with central finite differences w.r.t. res."""
+    _, _, jPu, jPd = _run(TM, mm, ab, lsrc, lrec, zsrc)
+    rtol = 1e-3 if ill else 1e-6
+
+    def P(k, dh):
+        """Pu, Pd with res[k] perturbed by dh."""
+        res = RES.copy()
+        res[k] += dh
+        return np.array(_empymod(res, TM, mm, ab, lsrc, lrec, zsrc))
+
+    for k in range(RES.size):
+        if ill:  # Fourth-order central FD with a larger step.
+            h = 3e-2*RES[k]
+            fd = (-P(k, 2*h) + 8*P(k, h) - 8*P(k, -h) + P(k, -2*h))/(12*h)
+        else:    # Second-order central FD.
+            h = 1e-6*RES[k]
+            fd = (P(k, h) - P(k, -h))/(2*h)
+        Pref = P(k, 0)
+
+        # Column k is the derivative w.r.t. res[k]. The absolute tolerance
+        # is the round-off floor of the FD (relevant for the air layer).
+        # In the ill-conditioned cases the FD noise exceeds this floor; it
+        # is then rtol relative to the column maximum, and at least 1e-8
+        # relative to the full Jacobian (air column ~1e-28).
+        for jac, fdi, Pi, jall in [(jPu[..., k], fd[0], Pref[0], jPu),
+                                   (jPd[..., k], fd[1], Pref[1], jPd)]:
+            atol = max(1e-8*np.abs(fdi).max(),
+                       1e2*np.finfo(float).eps*np.abs(Pi).max()/h)
+            if ill:
+                atol = max(atol, rtol*np.abs(fdi).max(),
+                           1e-8*np.abs(jall).max())
+            assert_allclose(jac, fdi, rtol=rtol, atol=atol)
+
+
 @pytest.mark.parametrize("lsrc, lrec, zsrc", LAYERS)
 @pytest.mark.parametrize("TM, mm", MODES)
 @pytest.mark.parametrize("ab", [11, 13])
 def test_jacobian_vs_fd(ab, TM, mm, lsrc, lrec, zsrc):
     """jPu, jPd must match central finite differences w.r.t. res."""
-    _, _, jPu, jPd = _run(TM, mm, ab, lsrc, lrec, zsrc)
+    ill = (lsrc, lrec, zsrc) in ILL_CONDITIONED
+    _check_fd(ab, TM, mm, lsrc, lrec, zsrc, ill)
 
-    for k in range(RES.size):
-        h = 1e-6*RES[k]
-        rp, rm = RES.copy(), RES.copy()
-        rp[k] += h
-        rm[k] -= h
-        Pu_p, Pd_p = _empymod(rp, TM, mm, ab, lsrc, lrec, zsrc)
-        Pu_m, Pd_m = _empymod(rm, TM, mm, ab, lsrc, lrec, zsrc)
 
-        # Column k is the derivative w.r.t. res[k]. The absolute tolerance
-        # is the round-off floor of the FD (relevant for the air layer).
-        for jac, fd, P in [(jPu[..., k], (Pu_p - Pu_m)/(2*h), Pu_p),
-                           (jPd[..., k], (Pd_p - Pd_m)/(2*h), Pd_p)]:
-            atol = max(1e-8*np.abs(fd).max(),
-                       1e2*np.finfo(float).eps*np.abs(P).max()/h)
-            assert_allclose(jac, fd, rtol=1e-6, atol=atol)
+@pytest.mark.parametrize("lsrc, lrec, zsrc", ILL_CONDITIONED)
+@pytest.mark.parametrize("TM, mm", MODES)
+@pytest.mark.parametrize("ab", [11, 13])
+def test_jacobian_vs_fd_conductive_top(ab, TM, mm, lsrc, lrec, zsrc,
+                                       monkeypatch):
+    """As above, with a conductive top layer: well-conditioned, strict."""
+    res = RES.copy()
+    res[0] = 20.
+    monkeypatch.setattr(sys.modules[__name__], 'RES', res)
+    _check_fd(ab, TM, mm, lsrc, lrec, zsrc, False)
