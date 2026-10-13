@@ -50,8 +50,8 @@ def __dir__():
 
 @nb.njit(**_numba_setting)
 def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-               lambd, ab, xdirect, msrc, mrec, jac_etaH=None,
-               jac_etaV=None, jac_depth_lower=None,
+               lambd, ab, xdirect, msrc, mrec, jac_etaH,
+               jac_etaV, jac_depth_lower=None,
                jac_src_z_indicator=None, src_z_col=-1,
                jac_rec_z_indicator=None, rec_z_col=-1,
                jac_zetaH=None, jac_zetaV=None):
@@ -95,10 +95,127 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     are correct, as no checks are carried out here.
 
     Primal documentation is inherited from empymod 2.6.
-    Resistivity Jacobian: eq. (2.41), (2.75), (2.84),
-    equations_public.pdf.
-        """
-    raise NotImplementedError()
+
+    Jacobian extension (res)
+    ------------------------
+    jac_etaH, jac_etaV : ndarray, shape (nfreq, nlayer, nlayer_res)
+        Derivatives of ``etaH``, ``etaV`` w.r.t. the parameters, as returned
+        by :func:`empygrad.model._stacked_eta_seeds`. Required; for the
+        primal only use :func:`empymod.kernel.wavenumber`.
+    jac_depth_lower, jac_src_z_indicator, src_z_col, jac_rec_z_indicator, \
+rec_z_col, jac_zetaH, jac_zetaV :
+        Not used (no depth, position, or permeability Jacobian).
+
+    Additionally returns jPJ0, jPJ1, jPJ0b, the derivatives of PJ0, PJ1,
+    PJ0b, with the parameter axis appended as last dimension.
+
+    Resistivity Jacobian: eq. (2.40), equations_public.pdf (the
+    collection is linear in PTM, PTE).
+    """
+
+    nfreq, _ = etaH.shape
+    noff, nlambda = lambd.shape
+
+    # ** CALCULATE GREEN'S FUNCTIONS
+    # Shape of PTM, PTE: (nfreq, noffs, nfilt)
+    PTM, PTE, jPTM, jPTE = greenfct(
+            zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
+            ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower,
+            jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col,
+            jac_zetaH, jac_zetaV)
+    nlayer_res = jPTM.shape[3]
+
+    # ** AB-SPECIFIC COLLECTION OF PJ0, PJ1, AND PJ0b
+
+    # Pre-allocate output
+    if ab in [11, 22, 24, 15, 33]:
+        PJ0 = np.zeros_like(PTM)
+        jPJ0 = np.zeros_like(jPTM)
+    else:
+        PJ0 = None
+        jPJ0 = None
+    if ab in [11, 12, 21, 22, 14, 24, 15, 25]:
+        PJ0b = np.zeros_like(PTM)
+        jPJ0b = np.zeros_like(jPTM)
+    else:
+        PJ0b = None
+        jPJ0b = None
+    if ab not in [33, ]:
+        PJ1 = np.zeros_like(PTM)
+        jPJ1 = np.zeros_like(jPTM)
+    else:
+        PJ1 = None
+        jPJ1 = None
+    Ptot = np.zeros_like(PTM)
+    jPtot = np.zeros_like(jPTM)
+
+    # Calculate Ptot which is used in all cases
+    fourpi = 4*np.pi
+    for i in range(nfreq):
+        for ii in range(noff):
+            for iv in range(nlambda):
+                Ptot[i, ii, iv] = (PTM[i, ii, iv] + PTE[i, ii, iv])/fourpi
+                for k in range(nlayer_res):
+                    jPtot[i, ii, iv, k] = (
+                            jPTM[i, ii, iv, k] + jPTE[i, ii, iv, k])/fourpi
+
+    # If rec is magnetic switch sign (reciprocity MM/ME => EE/EM).
+    if mrec:
+        sign = -1
+    else:
+        sign = 1
+
+    # Group into PJ0 and PJ1 for J0/J1 Hankel Transform
+    if ab in [11, 12, 21, 22, 14, 24, 15, 25]:    # Eqs 105, 106, 111, 112,
+        # J2(kr) = 2/(kr)*J1(kr) - J0(kr)         #     119, 120, 123, 124
+        if ab in [14, 22]:
+            sign *= -1
+        for i in range(nfreq):
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    PJ0b[i, ii, iv] = sign/2*Ptot[i, ii, iv]*lambd[ii, iv]
+                    PJ1[i, ii, iv] = -sign*Ptot[i, ii, iv]
+                    for k in range(nlayer_res):
+                        jPJ0b[i, ii, iv, k] = sign/2*jPtot[
+                                i, ii, iv, k]*lambd[ii, iv]
+                        jPJ1[i, ii, iv, k] = -sign*jPtot[i, ii, iv, k]
+
+        if ab in [11, 22, 24, 15]:
+            if ab in [22, 24]:
+                sign *= -1
+            eightpi = sign*8*np.pi
+            for i in range(nfreq):
+                for ii in range(noff):
+                    for iv in range(nlambda):
+                        PJ0[i, ii, iv] = PTM[i, ii, iv] - PTE[i, ii, iv]
+                        PJ0[i, ii, iv] *= lambd[ii, iv]/eightpi
+                        for k in range(nlayer_res):
+                            jPJ0[i, ii, iv, k] = (
+                                    jPTM[i, ii, iv, k] - jPTE[i, ii, iv, k]
+                                    )*lambd[ii, iv]/eightpi
+
+    elif ab in [13, 23, 31, 32, 34, 35, 16, 26]:  # Eqs 107, 113, 114, 115,
+        if ab in [34, 26]:                        # .   121, 125, 126, 127
+            sign *= -1
+        for i in range(nfreq):
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    dlambd = lambd[ii, iv]*lambd[ii, iv]
+                    PJ1[i, ii, iv] = sign*Ptot[i, ii, iv]*dlambd
+                    for k in range(nlayer_res):
+                        jPJ1[i, ii, iv, k] = sign*jPtot[i, ii, iv, k]*dlambd
+
+    elif ab in [33, ]:                            # Eq 116
+        for i in range(nfreq):
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    tlambd = lambd[ii, iv]*lambd[ii, iv]*lambd[ii, iv]
+                    PJ0[i, ii, iv] = sign*Ptot[i, ii, iv]*tlambd
+                    for k in range(nlayer_res):
+                        jPJ0[i, ii, iv, k] = sign*jPtot[i, ii, iv, k]*tlambd
+
+    # Return PJ0, PJ1, PJ0b
+    return PJ0, PJ1, PJ0b, jPJ0, jPJ1, jPJ0b
 
 
 @nb.njit(**_numba_setting)
@@ -127,10 +244,419 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     This function is called from the function :func:`wavenumber`.
 
     Primal documentation is inherited from empymod 2.6.
+
+    Jacobian extension (res)
+    ------------------------
+    jac_etaH, jac_etaV : ndarray, shape (nfreq, nlayer, nlayer_res)
+        Derivatives of ``etaH``, ``etaV`` w.r.t. the parameters, as returned
+        by :func:`empygrad.model._stacked_eta_seeds`.
+    jac_depth_lower, jac_src_z_indicator, src_z_col, jac_rec_z_indicator, \
+rec_z_col, jac_zetaH, jac_zetaV :
+        Not used (no depth, position, or permeability Jacobian).
+
+    Additionally returns jGTM, jGTE, the derivatives of GTM, GTE, with the
+    parameter axis appended as last dimension.
+
     Resistivity Jacobian: eq. (2.41), (2.75), (2.84),
     equations_public.pdf.
     """
-    raise NotImplementedError()
+    nfreq, nlayer = etaH.shape
+    noff, nlambda = lambd.shape
+    nlayer_res = jac_etaH.shape[2]
+
+    # Pre-swap values and seeds, used for the derivative of Gam.
+    oetaH, oetaV, ozetaH, ozetaV = etaH, etaV, zetaH, zetaV
+    jzero = np.zeros_like(jac_etaH)
+
+    # Seeds of the (possibly swapped) eta/zeta; zeta does not depend on res.
+    jetaH, jetaV = jac_etaH, jac_etaV
+    jzetaH, jzetaV = jzero, jzero
+
+    # GTM/GTE have shape (frequency, offset, lambda).
+    # gamTM/gamTE have shape (frequency, offset, layer, lambda):
+
+    # Reciprocity switches for magnetic receivers
+    if mrec:
+        if msrc:  # If src is also magnetic, switch eta and zeta (MM => EE).
+            # G^mm_ab(s, r, e, z) = -G^ee_ab(s, r, -z, -e)
+            etaH, zetaH = -zetaH, -etaH
+            etaV, zetaV = -zetaV, -etaV
+            jetaH, jzetaH = -jzetaH, -jetaH
+            jetaV, jzetaV = -jzetaV, -jetaV
+        else:  # If src is electric, swap src and rec (ME => EM).
+            # G^me_ab(s, r, e, z) = -G^em_ba(r, s, e, z)
+            zsrc, zrec = zrec, zsrc
+            lsrc, lrec = lrec, lsrc
+
+    for TM in [True, False]:
+
+        # Continue if Green's function not required
+        if TM and ab in [16, 26]:
+            continue
+        elif not TM and ab in [13, 23, 31, 32, 33, 34, 35]:
+            continue
+
+        # Define eta/zeta depending if TM or TE
+        if TM:
+            e_zH, e_zV, z_eH = etaH, etaV, zetaH   # TM: zetaV not used
+            je_zH = jetaH
+        else:
+            e_zH, e_zV, z_eH = zetaH, zetaV, etaH  # TE: etaV not used
+            je_zH = jzetaH
+
+        # Uppercase gamma
+        Gam = np.zeros((nfreq, noff, nlayer, nlambda), etaH.dtype)
+        for i in range(nfreq):
+            for ii in range(noff):
+                for iii in range(nlayer):
+                    h_div_v = e_zH[i, iii]/e_zV[i, iii]
+                    h_times_h = z_eH[i, iii]*e_zH[i, iii]
+                    for iv in range(nlambda):
+                        l2 = lambd[ii, iv]*lambd[ii, iv]
+                        Gam[i, ii, iii, iv] = np.sqrt(h_div_v*l2 + h_times_h)
+
+        # Derivative of Gam, eq. (2.17)–(2.21), equations_public.pdf; TE-MM
+        # is identical in form to TM with the pre-swap values, TM-MM to TE.
+        jGam = np.zeros((nfreq, noff, nlayer, nlambda, nlayer_res),
+                        etaH.dtype)
+        if TM != (msrc and mrec):
+            _fill_jac_Gam_TM(jGam, Gam, lambd, oetaH, oetaV, ozetaH,
+                             jac_etaH, jac_etaV, jzero)
+        else:
+            _fill_jac_Gam_TE(jGam, Gam, lambd, oetaH, ozetaH, ozetaV,
+                             jac_etaH, jzero, jzero)
+
+        # Gamma in receiver layer
+        lrecGam = Gam[:, :, lrec, :]
+        jlrecGam = jGam[:, :, lrec, :, :]
+
+        # Reflection (coming from below (Rp) and above (Rm) rec)
+        if nlayer > 1:  # Only if more than 1 layer
+            Rp, Rm, jRp, jRm = reflections(depth, e_zH, Gam, lrec, lsrc,
+                                           je_zH, jGam, jac_depth_lower)
+
+            # Field propagators
+            # (Up- (Wu) and downgoing (Wd), in rec layer); Eq 74
+            Wu = np.zeros_like(lrecGam)
+            Wd = np.zeros_like(lrecGam)
+            jWu = np.zeros_like(jlrecGam)
+            jWd = np.zeros_like(jlrecGam)
+
+            if lrec != nlayer-1:  # No upgoing field prop. if rec in last
+                ddepth = depth[lrec + 1] - zrec
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            Wu[i, ii, iv] = np.exp(-lrecGam[i, ii, iv]*ddepth)
+
+                            # eq. (2.49), equations_public.pdf
+                            for k in range(nlayer_res):
+                                jWu[i, ii, iv, k] = -ddepth*jlrecGam[
+                                        i, ii, iv, k]*Wu[i, ii, iv]
+
+            if lrec != 0:     # No downgoing field propagator if rec in first
+                ddepth = zrec - depth[lrec]
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            Wd[i, ii, iv] = np.exp(-lrecGam[i, ii, iv]*ddepth)
+
+                            # eq. (2.50), equations_public.pdf
+                            for k in range(nlayer_res):
+                                jWd[i, ii, iv, k] = -ddepth*jlrecGam[
+                                        i, ii, iv, k]*Wd[i, ii, iv]
+
+            # Field at rec level (coming from below (Pu) and above (Pd) rec)
+            Pu, Pd, jPu, jPd = fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc,
+                                      ab, TM, jRp, jRm, jGam, None)
+
+        # Green's functions
+        green = np.zeros_like(lrecGam)
+        jgreen = np.zeros_like(jlrecGam)
+        if lsrc == lrec:  # Rec in src layer; Eqs 108, 109, 110, 117, 118, 122
+
+            # Green's function depending on <ab>
+            # (If only one layer, no reflections/fields)
+            if nlayer > 1 and ab in [13, 23, 31, 32, 14, 24, 15, 25]:
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            green[i, ii, iv] = Pu[i, ii, iv]*Wu[i, ii, iv]
+                            green[i, ii, iv] -= Pd[i, ii, iv]*Wd[i, ii, iv]
+
+                            # eq. (2.47)–(2.48), equations_public.pdf
+                            for k in range(nlayer_res):
+                                jgreen[i, ii, iv, k] = (
+                                    jPu[i, ii, iv, k]*Wu[i, ii, iv] +
+                                    Pu[i, ii, iv]*jWu[i, ii, iv, k] -
+                                    jPd[i, ii, iv, k]*Wd[i, ii, iv] -
+                                    Pd[i, ii, iv]*jWd[i, ii, iv, k])
+
+            elif nlayer > 1:
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            green[i, ii, iv] = Pu[i, ii, iv]*Wu[i, ii, iv]
+                            green[i, ii, iv] += Pd[i, ii, iv]*Wd[i, ii, iv]
+
+                            # eq. (2.47)–(2.48), equations_public.pdf
+                            for k in range(nlayer_res):
+                                jgreen[i, ii, iv, k] = (
+                                    jPu[i, ii, iv, k]*Wu[i, ii, iv] +
+                                    Pu[i, ii, iv]*jWu[i, ii, iv, k] +
+                                    jPd[i, ii, iv, k]*Wd[i, ii, iv] +
+                                    Pd[i, ii, iv]*jWd[i, ii, iv, k])
+
+            # Direct field, if it is computed in the wavenumber domain
+            if not xdirect:
+                ddepth = abs(zsrc - zrec)
+                dsign = np.sign(zrec - zsrc)
+                minus_ab = [11, 12, 13, 14, 15, 21, 22, 23, 24, 25]
+
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+
+                            # Direct field
+                            directf = np.exp(-lrecGam[i, ii, iv]*ddepth)
+
+                            # Swap TM for certain <ab>
+                            if TM and ab in minus_ab:
+                                directf *= -1
+
+                            # Multiply by zrec-zsrc-sign for certain <ab>
+                            if ab in [13, 14, 15, 23, 24, 25, 31, 32]:
+                                directf *= dsign
+
+                            # Add direct field to Green's function
+                            green[i, ii, iv] += directf
+
+                            # Derivative of the direct field
+                            for k in range(nlayer_res):
+                                jgreen[i, ii, iv, k] -= ddepth*jlrecGam[
+                                        i, ii, iv, k]*directf
+
+        else:
+
+            # Calculate exponential factor
+            if lrec == nlayer-1:
+                ddepth = 0
+            else:
+                ddepth = depth[lrec+1] - depth[lrec]
+
+            fexp = np.zeros_like(lrecGam)
+            jfexp = np.zeros_like(jlrecGam)
+            for i in range(nfreq):
+                for ii in range(noff):
+                    for iv in range(nlambda):
+                        fexp[i, ii, iv] = np.exp(-lrecGam[i, ii, iv]*ddepth)
+
+                        # exp(-Gam*inf) = 0 has a zero derivative
+                        if np.isfinite(ddepth):
+                            for k in range(nlayer_res):
+                                jfexp[i, ii, iv, k] = -ddepth*jlrecGam[
+                                        i, ii, iv, k]*fexp[i, ii, iv]
+
+            # Sign-switch for Green calculation
+            if TM and ab in [11, 12, 13, 21, 22, 23, 14, 24, 15, 25]:
+                pmw = -1
+            else:
+                pmw = 1
+
+            # Derivatives: product rule on the primal expressions (rec
+            # outside the src layer is not in equations_public.pdf).
+
+            if lrec < lsrc:  # Rec above src layer: Pd not used
+                #              Eqs 89-94, A18-A23, B13-B15
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            green[i, ii, iv] = Pu[i, ii, iv]*(
+                                    Wu[i, ii, iv] + pmw*Rm[i, ii, 0, iv] *
+                                    fexp[i, ii, iv]*Wd[i, ii, iv])
+
+                            for k in range(nlayer_res):
+                                jgreen[i, ii, iv, k] = jPu[i, ii, iv, k]*(
+                                    Wu[i, ii, iv] + pmw*Rm[i, ii, 0, iv] *
+                                    fexp[i, ii, iv]*Wd[i, ii, iv]
+                                    ) + Pu[i, ii, iv]*(
+                                    jWu[i, ii, iv, k] + pmw*(
+                                        jRm[i, ii, 0, iv, k] *
+                                        fexp[i, ii, iv]*Wd[i, ii, iv] +
+                                        Rm[i, ii, 0, iv] *
+                                        jfexp[i, ii, iv, k]*Wd[i, ii, iv] +
+                                        Rm[i, ii, 0, iv] *
+                                        fexp[i, ii, iv]*jWd[i, ii, iv, k]))
+
+            elif lrec > lsrc:  # rec below src layer: Pu not used
+                #                Eqs 97-102 A26-A30, B16-B18
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            green[i, ii, iv] = Pd[i, ii, iv]*(
+                                    pmw*Wd[i, ii, iv] +
+                                    Rp[i, ii, abs(lsrc-lrec), iv] *
+                                    fexp[i, ii, iv]*Wu[i, ii, iv])
+
+                            iR = abs(lsrc-lrec)
+                            for k in range(nlayer_res):
+                                jgreen[i, ii, iv, k] = jPd[i, ii, iv, k]*(
+                                    pmw*Wd[i, ii, iv] +
+                                    Rp[i, ii, iR, iv] *
+                                    fexp[i, ii, iv]*Wu[i, ii, iv]
+                                    ) + Pd[i, ii, iv]*(
+                                    pmw*jWd[i, ii, iv, k] +
+                                    jRp[i, ii, iR, iv, k] *
+                                    fexp[i, ii, iv]*Wu[i, ii, iv] +
+                                    Rp[i, ii, iR, iv] *
+                                    jfexp[i, ii, iv, k]*Wu[i, ii, iv] +
+                                    Rp[i, ii, iR, iv] *
+                                    fexp[i, ii, iv]*jWu[i, ii, iv, k])
+
+        # Store in corresponding variable
+        if TM:
+            gamTM, GTM = Gam, green
+            jgamTM, jGTM = jGam, jgreen
+        else:
+            gamTE, GTE = Gam, green
+            jgamTE, jGTE = jGam, jgreen
+
+    # ** AB-SPECIFIC FACTORS AND CALCULATION OF PTOT'S
+    # These are the factors inside the integrals
+    # Eqs 105-107, 111-116, 119-121, 123-128
+
+    # Derivatives: G *= f gives jG = (jG + G*dlog)*f, with dlog = d(f)/f the
+    # logarithmic derivative of the factor; computed before G is updated.
+    # eq. (2.75) and (2.84), equations_public.pdf.
+
+    if ab in [11, 12, 21, 22]:
+        for i in range(nfreq):
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = (jgamTM[i, ii, lrec, iv, k] /
+                                gamTM[i, ii, lrec, iv] -
+                                jetaH[i, lrec, k]/etaH[i, lrec])
+                        jGTM[i, ii, iv, k] = (
+                                jGTM[i, ii, iv, k] + GTM[i, ii, iv]*dlog
+                                )*gamTM[i, ii, lrec, iv]/etaH[i, lrec]
+                        dlog = (jzetaH[i, lsrc, k]/zetaH[i, lsrc] -
+                                jgamTE[i, ii, lsrc, iv, k] /
+                                gamTE[i, ii, lsrc, iv])
+                        jGTE[i, ii, iv, k] = (
+                                jGTE[i, ii, iv, k] + GTE[i, ii, iv]*dlog
+                                )*zetaH[i, lsrc]/gamTE[i, ii, lsrc, iv]
+                    GTM[i, ii, iv] *= gamTM[i, ii, lrec, iv]/etaH[i, lrec]
+                    GTE[i, ii, iv] *= zetaH[i, lsrc]/gamTE[i, ii, lsrc, iv]
+
+    elif ab in [14, 15, 24, 25]:
+        for i in range(nfreq):
+            fact = etaH[i, lsrc]/etaH[i, lrec]
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = (jetaH[i, lsrc, k]/etaH[i, lsrc] -
+                                jetaH[i, lrec, k]/etaH[i, lrec] +
+                                jgamTM[i, ii, lrec, iv, k] /
+                                gamTM[i, ii, lrec, iv] -
+                                jgamTM[i, ii, lsrc, iv, k] /
+                                gamTM[i, ii, lsrc, iv])
+                        jGTM[i, ii, iv, k] = (
+                                jGTM[i, ii, iv, k] + GTM[i, ii, iv]*dlog
+                                )*fact*gamTM[i, ii, lrec, iv] / gamTM[
+                                        i, ii, lsrc, iv]
+                    GTM[i, ii, iv] *= fact*gamTM[i, ii, lrec, iv]
+                    GTM[i, ii, iv] /= gamTM[i, ii, lsrc, iv]
+
+    elif ab in [13, 23]:
+        GTE = np.zeros_like(GTM)
+        jGTE = np.zeros_like(jGTM)
+        for i in range(nfreq):
+            fact = etaH[i, lsrc]/etaH[i, lrec]/etaV[i, lsrc]
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = (jetaH[i, lsrc, k]/etaH[i, lsrc] -
+                                jetaH[i, lrec, k]/etaH[i, lrec] -
+                                jetaV[i, lsrc, k]/etaV[i, lsrc] +
+                                jgamTM[i, ii, lrec, iv, k] /
+                                gamTM[i, ii, lrec, iv] -
+                                jgamTM[i, ii, lsrc, iv, k] /
+                                gamTM[i, ii, lsrc, iv])
+                        jGTM[i, ii, iv, k] = -(
+                                jGTM[i, ii, iv, k] + GTM[i, ii, iv]*dlog
+                                )*fact*gamTM[i, ii, lrec, iv] / gamTM[
+                                        i, ii, lsrc, iv]
+                    GTM[i, ii, iv] *= -fact*gamTM[i, ii, lrec, iv]
+                    GTM[i, ii, iv] /= gamTM[i, ii, lsrc, iv]
+
+    elif ab in [31, 32]:
+        GTE = np.zeros_like(GTM)
+        jGTE = np.zeros_like(jGTM)
+        for i in range(nfreq):
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = -jetaV[i, lrec, k]/etaV[i, lrec]
+                        jGTM[i, ii, iv, k] = (
+                                jGTM[i, ii, iv, k] + GTM[i, ii, iv]*dlog
+                                )/etaV[i, lrec]
+                    GTM[i, ii, iv] /= etaV[i, lrec]
+
+    elif ab in [34, 35]:
+        GTE = np.zeros_like(GTM)
+        jGTE = np.zeros_like(jGTM)
+        for i in range(nfreq):
+            fact = etaH[i, lsrc]/etaV[i, lrec]
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = (jetaH[i, lsrc, k]/etaH[i, lsrc] -
+                                jetaV[i, lrec, k]/etaV[i, lrec] -
+                                jgamTM[i, ii, lsrc, iv, k] /
+                                gamTM[i, ii, lsrc, iv])
+                        jGTM[i, ii, iv, k] = (
+                                jGTM[i, ii, iv, k] + GTM[i, ii, iv]*dlog
+                                )*fact/gamTM[i, ii, lsrc, iv]
+                    GTM[i, ii, iv] *= fact/gamTM[i, ii, lsrc, iv]
+
+    elif ab in [16, 26]:
+        GTM = np.zeros_like(GTE)
+        jGTM = np.zeros_like(jGTE)
+        for i in range(nfreq):
+            fact = zetaH[i, lsrc]/zetaV[i, lsrc]
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = (jzetaH[i, lsrc, k]/zetaH[i, lsrc] -
+                                jzetaV[i, lsrc, k]/zetaV[i, lsrc] -
+                                jgamTE[i, ii, lsrc, iv, k] /
+                                gamTE[i, ii, lsrc, iv])
+                        jGTE[i, ii, iv, k] = (
+                                jGTE[i, ii, iv, k] + GTE[i, ii, iv]*dlog
+                                )*fact/gamTE[i, ii, lsrc, iv]
+                    GTE[i, ii, iv] *= fact/gamTE[i, ii, lsrc, iv]
+
+    elif ab in [33, ]:
+        GTE = np.zeros_like(GTM)
+        jGTE = np.zeros_like(jGTM)
+        for i in range(nfreq):
+            fact = etaH[i, lsrc]/etaV[i, lsrc]/etaV[i, lrec]
+            for ii in range(noff):
+                for iv in range(nlambda):
+                    for k in range(nlayer_res):
+                        dlog = (jetaH[i, lsrc, k]/etaH[i, lsrc] -
+                                jetaV[i, lsrc, k]/etaV[i, lsrc] -
+                                jetaV[i, lrec, k]/etaV[i, lrec] -
+                                jgamTM[i, ii, lsrc, iv, k] /
+                                gamTM[i, ii, lsrc, iv])
+                        jGTM[i, ii, iv, k] = (
+                                jGTM[i, ii, iv, k] + GTM[i, ii, iv]*dlog
+                                )*fact/gamTM[i, ii, lsrc, iv]
+                    GTM[i, ii, iv] *= fact/gamTM[i, ii, lsrc, iv]
+
+    # Return Green's functions
+    return GTM, GTE, jGTM, jGTE
 
 
 @nb.njit(**_numba_with_fm)
@@ -644,17 +1170,6 @@ def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, etaH, zetaH, zetaV,
                         # eq. (2.19) and (2.21), equations_public.pdf
                         jac_Gam[i, ii, iii, iv, k] = (
                             zH_val*jac_etaH[i, iii, k]/two_G)
-
-
-@nb.njit(**_numba_setting)
-def _wavenumber_jac_collect(jac_PTM, jac_PTE, lambd, ab, sign,
-                            jac_PJ0, jac_PJ1, jac_PJ0b):
-    r"""Fill jac_PJ0/PJ1/PJ0b in-place from jac_PTM/jac_PTE.
-
-    Resistivity Jacobian: eq. (2.41), (2.75), (2.84),
-    equations_public.pdf.
-    """
-    raise NotImplementedError()
 
 
 def _fullspace_derivative(off, angle, zsrc, zrec, etaH, etaV, zetaH, zetaV, ab,
