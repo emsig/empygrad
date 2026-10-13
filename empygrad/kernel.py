@@ -28,10 +28,8 @@ root directory for more information regarding the involved licenses.
 # License for the specific language governing permissions and limitations under
 # the License.
 
-from empymod import kernel as _empymod_kernel
 from empymod.kernel import angle_factor
 import numpy as np
-import scipy as sp
 import numba as nb
 
 __all__ = ['wavenumber', 'angle_factor', 'fullspace', 'greenfct',
@@ -50,11 +48,7 @@ def __dir__():
 
 @nb.njit(**_numba_setting)
 def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-               lambd, ab, xdirect, msrc, mrec, jac_etaH,
-               jac_etaV, jac_depth_lower=None,
-               jac_src_z_indicator=None, src_z_col=-1,
-               jac_rec_z_indicator=None, rec_z_col=-1,
-               jac_zetaH=None, jac_zetaV=None):
+               lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV):
     r"""Calculate wavenumber domain solution.
 
     Return the wavenumber domain solutions `PJ0`, `PJ1`, and `PJ0b`, which have
@@ -102,9 +96,6 @@ def wavenumber(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
         Derivatives of ``etaH``, ``etaV`` w.r.t. the parameters, as returned
         by :func:`empygrad.model._stacked_eta_seeds`. Required; for the
         primal only use :func:`empymod.kernel.wavenumber`.
-    jac_depth_lower, jac_src_z_indicator, src_z_col, jac_rec_z_indicator, \
-rec_z_col, jac_zetaH, jac_zetaV :
-        Not used (no depth, position, or permeability Jacobian).
 
     Additionally returns jPJ0, jPJ1, jPJ0b, the derivatives of PJ0, PJ1,
     PJ0b, with the parameter axis appended as last dimension.
@@ -120,9 +111,7 @@ rec_z_col, jac_zetaH, jac_zetaV :
     # Shape of PTM, PTE: (nfreq, noffs, nfilt)
     PTM, PTE, jPTM, jPTE = greenfct(
             zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd,
-            ab, xdirect, msrc, mrec, jac_etaH, jac_etaV, jac_depth_lower,
-            jac_src_z_indicator, src_z_col, jac_rec_z_indicator, rec_z_col,
-            jac_zetaH, jac_zetaV)
+            ab, xdirect, msrc, mrec, jac_etaH, jac_etaV)
     nlayer_res = jPTM.shape[3]
 
     # ** AB-SPECIFIC COLLECTION OF PJ0, PJ1, AND PJ0b
@@ -220,9 +209,7 @@ rec_z_col, jac_zetaH, jac_zetaV :
 
 @nb.njit(**_numba_setting)
 def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
-             lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV,
-             jac_depth_lower, jac_src_z_indicator, src_z_col,
-             jac_rec_z_indicator, rec_z_col, jac_zetaH, jac_zetaV):
+             lambd, ab, xdirect, msrc, mrec, jac_etaH, jac_etaV):
     r"""Calculate Green's function for TM and TE.
 
     .. math::
@@ -250,9 +237,6 @@ def greenfct(zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV,
     jac_etaH, jac_etaV : ndarray, shape (nfreq, nlayer, nlayer_res)
         Derivatives of ``etaH``, ``etaV`` w.r.t. the parameters, as returned
         by :func:`empygrad.model._stacked_eta_seeds`.
-    jac_depth_lower, jac_src_z_indicator, src_z_col, jac_rec_z_indicator, \
-rec_z_col, jac_zetaH, jac_zetaV :
-        Not used (no depth, position, or permeability Jacobian).
 
     Additionally returns jGTM, jGTE, the derivatives of GTM, GTE, with the
     parameter axis appended as last dimension.
@@ -265,7 +249,7 @@ rec_z_col, jac_zetaH, jac_zetaV :
     nlayer_res = jac_etaH.shape[2]
 
     # Pre-swap values and seeds, used for the derivative of Gam.
-    oetaH, oetaV, ozetaH, ozetaV = etaH, etaV, zetaH, zetaV
+    oetaH, oetaV, ozetaH = etaH, etaV, zetaH
     jzero = np.zeros_like(jac_etaH)
 
     # Seeds of the (possibly swapped) eta/zeta; zeta does not depend on res.
@@ -321,10 +305,9 @@ rec_z_col, jac_zetaH, jac_zetaV :
                         etaH.dtype)
         if TM != (msrc and mrec):
             _fill_jac_Gam_TM(jGam, Gam, lambd, oetaH, oetaV, ozetaH,
-                             jac_etaH, jac_etaV, jzero)
+                             jac_etaH, jac_etaV)
         else:
-            _fill_jac_Gam_TE(jGam, Gam, lambd, oetaH, ozetaH, ozetaV,
-                             jac_etaH, jzero, jzero)
+            _fill_jac_Gam_TE(jGam, Gam, lambd, ozetaH, jac_etaH)
 
         # Gamma in receiver layer
         lrecGam = Gam[:, :, lrec, :]
@@ -333,7 +316,7 @@ rec_z_col, jac_zetaH, jac_zetaV :
         # Reflection (coming from below (Rp) and above (Rm) rec)
         if nlayer > 1:  # Only if more than 1 layer
             Rp, Rm, jRp, jRm = reflections(depth, e_zH, Gam, lrec, lsrc,
-                                           je_zH, jGam, jac_depth_lower)
+                                           je_zH, jGam)
 
             # Field propagators
             # (Up- (Wu) and downgoing (Wd), in rec layer); Eq 74
@@ -368,7 +351,7 @@ rec_z_col, jac_zetaH, jac_zetaV :
 
             # Field at rec level (coming from below (Pu) and above (Pd) rec)
             Pu, Pd, jPu, jPd = fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc,
-                                      ab, TM, jRp, jRm, jGam, None)
+                                      ab, TM, jRp, jRm, jGam)
 
         # Green's functions
         green = np.zeros_like(lrecGam)
@@ -660,8 +643,7 @@ rec_z_col, jac_zetaH, jac_zetaV :
 
 
 @nb.njit(**_numba_with_fm)
-def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
-                jac_depth_lower):
+def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam):
     r"""Calculate Rp, Rm.
 
     .. math::
@@ -683,8 +665,6 @@ def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
         Derivative of ``e_zH`` w.r.t. the parameters.
     jac_Gam : ndarray, shape (nfreq, noff, nlayer, nlambda, nlayer_res)
         Derivative of ``Gam`` w.r.t. the parameters.
-    jac_depth_lower : ndarray
-        Not used (no depth Jacobian).
 
     Additionally returns jRp, jRm, the derivatives of Rp, Rm, with the
     parameter axis appended as last dimension.
@@ -810,7 +790,7 @@ def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
 
 @nb.njit(**_numba_setting)
 def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
-           jac_Rp, jac_Rm, jac_Gam, jac_dists):
+           jac_Rp, jac_Rm, jac_Gam):
     r"""Calculate Pu+, Pu-, Pd+, Pd-.
 
     .. math::
@@ -835,8 +815,6 @@ def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
         :func:`reflections`.
     jac_Gam : ndarray, shape (nfreq, noff, nlayer, nlambda, nlayer_res)
         Derivative of ``Gam`` w.r.t. the parameters.
-    jac_dists : ndarray
-        Not used (no depth or position Jacobian).
 
     Additionally returns jPu, jPd, the derivatives of Pu, Pd, with the
     parameter axis appended as last dimension.
@@ -1107,7 +1085,7 @@ def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
 
 @nb.njit(**_numba_setting)
 def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
-                     jac_etaH, jac_etaV, jac_zetaH):
+                     jac_etaH, jac_etaV):
     r"""Fill jac_Gam in-place for the TM non-MM case (explicit scalar loops).
 
     Implements d(Gam)/d(p) = d(Gam^2)/d(p) / (2 Gam), with
@@ -1145,8 +1123,7 @@ def _fill_jac_Gam_TM(jac_Gam, Gam, lambd, etaH, etaV, zetaH,
 
 
 @nb.njit(**_numba_setting)
-def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, etaH, zetaH, zetaV,
-                     jac_etaH, jac_zetaH, jac_zetaV):
+def _fill_jac_Gam_TE(jac_Gam, Gam, lambd, zetaH, jac_etaH):
     r"""Fill jac_Gam in-place for the TE non-MM and TM-MM cases.
 
     Implements d(Gam)/d(p) = d(Gam^2)/d(p) / (2 Gam), with

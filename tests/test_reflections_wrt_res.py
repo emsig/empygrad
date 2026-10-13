@@ -68,10 +68,9 @@ def _seeds(TM, mm):
     jac_Gam = np.zeros(Gam.shape + (RES.size, ), dtype=Gam.dtype)
     if TM != mm:  # TM non-MM and TE-MM
         _fill_jac_Gam_TM(jac_Gam, Gam, LAMBD, etaH, etaV, zetaH,
-                         jac_etaH, jac_etaV, jac_zero)
+                         jac_etaH, jac_etaV)
     else:  # TE non-MM and TM-MM
-        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, etaH, zetaH, zetaV,
-                         jac_etaH, jac_zero, jac_zero)
+        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, zetaH, jac_etaH)
 
     # e_zH is etaH (TM), zetaH (TE), -zetaH (TM-MM), or -etaH (TE-MM).
     if TM and not mm:
@@ -87,9 +86,7 @@ def _run(TM, mm, lsrc, lrec):
     """Return Rp, Rm, jRp, jRm of empygrad.kernel.reflections."""
     e_zH, Gam = _primal(RES, TM, mm)
     jac_e_zH, jac_Gam = _seeds(TM, mm)
-    jac_depth_lower = np.zeros((RES.size-1, RES.size))
-    return reflections(DEPTH, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
-                       jac_depth_lower)
+    return reflections(DEPTH, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam)
 
 
 @pytest.mark.parametrize("lsrc, lrec", LAYERS)
