@@ -282,7 +282,7 @@ def reflections(depth, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
     return Rp, Rm, jRp, jRm
 
 
-@nb.njit(nogil=True, cache=True)
+@nb.njit(**_numba_setting)
 def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
            jac_Rp, jac_Rm, jac_Gam, jac_dists):
     r"""Calculate Pu+, Pu-, Pd+, Pd-.
@@ -301,10 +301,282 @@ def fields(depth, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
     This function is called from the function :func:`greenfct`.
 
     Primal documentation is inherited from empymod 2.6.
-    Resistivity Jacobian: eq. (2.44)–(2.93),
-    equations_public.pdf.
+
+    Jacobian extension (res)
+    ------------------------
+    jac_Rp, jac_Rm : ndarray
+        Derivatives of ``Rp``, ``Rm`` w.r.t. the parameters, as returned by
+        :func:`reflections`.
+    jac_Gam : ndarray, shape (nfreq, noff, nlayer, nlambda, nlayer_res)
+        Derivative of ``Gam`` w.r.t. the parameters.
+    jac_dists : ndarray
+        Not used (no depth or position Jacobian).
+
+    Additionally returns jPu, jPd, the derivatives of Pu, Pd, with the
+    parameter axis appended as last dimension.
+
+    Resistivity Jacobian: eq. (2.44)–(2.74), equations_public.pdf, for the
+    receiver in the source layer. The receiver-outside-source-layer
+    derivatives (eqs 95/96, 103/104 in [HuTS15]_) are not in the PDF.
     """
-    raise NotImplementedError()
+
+    nfreq, noff, nlayer, nlambda = Gam.shape
+    nlayer_res = jac_Gam.shape[4]
+
+    # Variables
+    nlsr = abs(lsrc-lrec)+1  # nr of layers btw and incl. src and rec layer
+    rsrcl = 0  # src-layer in reflection (Rp/Rm), first if down
+    izrange = range(2, nlsr)
+    isr = lsrc
+    last = nlayer-1
+
+    # Booleans if src in first or last layer; swapped if up=True
+    first_layer = lsrc == 0
+    last_layer = lsrc == nlayer-1
+
+    # Depths; dp and dm are swapped if up=True
+    if lsrc != nlayer-1:
+        ds = depth[lsrc+1]-depth[lsrc]
+        dp = depth[lsrc+1]-zsrc
+    dm = zsrc-depth[lsrc]
+
+    # Rm and Rp; swapped if up=True
+    Rmp = Rm
+    Rpm = Rp
+    jRmp = jac_Rm
+    jRpm = jac_Rp
+
+    # Boolean if plus or minus has to be calculated
+    plusset = [13, 23, 33, 14, 24, 34, 15, 25, 35]
+    if TM:
+        plus = ab in plusset
+    else:
+        plus = ab not in plusset
+
+    # Sign-switches
+    pm = 1     # + if plus=True, - if plus=False
+    if not plus:
+        pm = -1
+    pup = -1   # + if up=True,   - if up=False
+    mupm = 1   # + except if up=True and plus=False
+
+    # Gamma of source layer
+    iGam = Gam[:, :, lsrc, :]
+    jiGam = jac_Gam[:, :, lsrc, :, :]
+
+    # Calculate down- and up-going fields
+    for up in [False, True]:
+
+        # No upgoing field if rec is in last layer or below src
+        if up and (lrec == nlayer-1 or lrec > lsrc):
+            Pu = np.zeros_like(iGam)
+            jPu = np.zeros_like(jiGam)
+            continue
+        # No downgoing field if rec is in first layer or above src
+        if not up and (lrec == 0 or lrec < lsrc):
+            Pd = np.zeros_like(iGam)
+            jPd = np.zeros_like(jiGam)
+            continue
+
+        # Swaps if up=True
+        if up:
+            if not last_layer:
+                dp, dm = dm, dp
+            else:
+                dp = dm
+            Rmp, Rpm = Rpm, Rmp
+            jRmp, jRpm = jRpm, jRmp
+            first_layer, last_layer = last_layer, first_layer
+            rsrcl = nlsr-1  # src-layer in refl. (Rp/Rm), last (nlsr-1) if up
+            izrange = range(nlsr-2)
+            isr = lrec
+            last = 0
+            pup = 1
+            if not plus:
+                mupm = -1
+
+        P = np.zeros_like(iGam)
+        jP = np.zeros_like(jiGam)
+
+        # Calculate Pu+, Pu-, Pd+, Pd-
+        if lsrc == lrec:  # rec in src layer; Eqs  81/82, A-8/A-9
+            if last_layer:  # If src/rec are in top (up) or bottom (down) layer
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            tRmp = Rmp[i, ii, 0, iv]
+                            tiGam = iGam[i, ii, iv]
+                            e1 = np.exp(-tiGam*dm)
+                            P[i, ii, iv] = tRmp*e1
+
+                            # eq. (2.44)–(2.45) with R_s = 0 on the far side,
+                            # equations_public.pdf
+                            for k in range(nlayer_res):
+                                jP[i, ii, iv, k] = (
+                                        jRmp[i, ii, 0, iv, k] -
+                                        tRmp*dm*jiGam[i, ii, iv, k])*e1
+
+            else:           # If src and rec are in any layer in between
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            tiGam = iGam[i, ii, iv]
+                            tRpm = Rpm[i, ii, 0, iv]
+                            tRmp = Rmp[i, ii, 0, iv]
+                            p1 = np.exp(-tiGam*dm)
+                            e2 = np.exp(-tiGam*(ds+dp))
+                            e3 = np.exp(-2*tiGam*ds)
+                            p2 = pm*tRpm*e2
+                            p3 = 1 - tRmp * tRpm * e3
+                            P[i, ii, iv] = (p1 + p2) * tRmp/p3
+
+                            # eq. (2.47)–(2.74), equations_public.pdf
+                            for k in range(nlayer_res):
+                                jG = jiGam[i, ii, iv, k]
+                                jRpm_k = jRpm[i, ii, 0, iv, k]
+                                jRmp_k = jRmp[i, ii, 0, iv, k]
+                                jp1 = -dm*jG*p1
+                                jp2 = pm*(jRpm_k - tRpm*(ds+dp)*jG)*e2
+                                jp3 = -(jRmp_k*tRpm + tRmp*jRpm_k -
+                                        2*ds*jG*tRmp*tRpm)*e3
+                                jP[i, ii, iv, k] = (
+                                        (jp1 + jp2)*tRmp + (p1 + p2)*jRmp_k -
+                                        P[i, ii, iv]*jp3)/p3
+
+        else:           # rec above (up) / below (down) src layer
+            #           # Eqs  95/96,  A-24/A-25 for rec above src layer
+            #           # Eqs 103/104, A-32/A-33 for rec below src layer
+            # Derivatives: not in equations_public.pdf; product and
+            # quotient rule on the primal expressions.
+
+            # First compute P_{s-1} (up) / P_{s+1} (down)
+            iRpm = Rpm[:, :, rsrcl, :]
+            if first_layer:  # If src is in bottom (up) / top (down) layer
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            tiRpm = iRpm[i, ii, iv]
+                            tiGam = iGam[i, ii, iv]
+                            e1 = np.exp(-tiGam*dp)
+                            P[i, ii, iv] = (1 + tiRpm)*mupm*e1
+
+                            for k in range(nlayer_res):
+                                jP[i, ii, iv, k] = mupm*(
+                                        jRpm[i, ii, rsrcl, iv, k] -
+                                        (1 + tiRpm)*dp*jiGam[i, ii, iv, k]
+                                        )*e1
+            else:
+                for i in range(nfreq):
+                    for ii in range(noff):
+                        for iv in range(nlambda):
+                            iRmp = Rmp[i, ii, rsrcl, iv]
+                            tiGam = iGam[i, ii, iv]
+                            tRpm = iRpm[i, ii, iv]
+                            e2 = np.exp(-tiGam * (ds+dm))
+                            e3 = np.exp(-2*tiGam*ds)
+                            den = 1 - iRmp*tRpm*e3
+                            p1 = mupm*np.exp(-tiGam*dp)
+                            p2 = pm*mupm*iRmp*e2
+                            p3 = (1 + tRpm)/den
+                            P[i, ii, iv] = (p1 + p2) * p3
+
+                            for k in range(nlayer_res):
+                                jG = jiGam[i, ii, iv, k]
+                                jRpm_k = jRpm[i, ii, rsrcl, iv, k]
+                                jRmp_k = jRmp[i, ii, rsrcl, iv, k]
+                                jp1 = -dp*jG*p1
+                                jp2 = pm*mupm*(jRmp_k - iRmp*(ds+dm)*jG)*e2
+                                jden = -(jRmp_k*tRpm + iRmp*jRpm_k -
+                                         2*ds*jG*iRmp*tRpm)*e3
+                                jp3 = (jRpm_k - p3*jden)/den
+                                jP[i, ii, iv, k] = (
+                                        (jp1 + jp2)*p3 + (p1 + p2)*jp3)
+
+            # If up or down and src is in last but one layer
+            if up or (not up and lsrc+1 < nlayer-1):
+                ddepth = depth[lsrc+1-1*pup]-depth[lsrc-1*pup]
+                if np.isfinite(ddepth):
+                    for i in range(nfreq):
+                        for ii in range(noff):
+                            for iv in range(nlambda):
+                                tiRpm = Rpm[i, ii, rsrcl-1*pup, iv]
+                                tiGam = Gam[i, ii, lsrc-1*pup, iv]
+                                e1 = np.exp(-2*tiGam*ddepth)
+                                fact = tiRpm*e1
+
+                                # Derivative before P is updated.
+                                for k in range(nlayer_res):
+                                    jfact = (
+                                        jRpm[i, ii, rsrcl-1*pup, iv, k] -
+                                        2*ddepth*tiRpm *
+                                        jac_Gam[i, ii, lsrc-1*pup, iv, k]
+                                        )*e1
+                                    jP[i, ii, iv, k] = (
+                                        jP[i, ii, iv, k] -
+                                        P[i, ii, iv]*jfact/(1 + fact)
+                                        )/(1 + fact)
+
+                                P[i, ii, iv] /= 1 + fact
+
+            # Second compute P for all other layers
+            if nlsr > 2:
+                for iz in izrange:
+                    ddepth = depth[isr+iz+pup+1]-depth[isr+iz+pup]
+                    for i in range(nfreq):
+                        for ii in range(noff):
+                            for iv in range(nlambda):
+                                tiRpm = Rpm[i, ii, iz+pup, iv]
+                                piGam = Gam[i, ii, isr+iz+pup, iv]
+                                e1 = np.exp(-piGam*ddepth)
+                                p1 = (1+tiRpm)*e1
+
+                                # Derivative before P is updated.
+                                for k in range(nlayer_res):
+                                    jp1 = (
+                                        jRpm[i, ii, iz+pup, iv, k] -
+                                        (1+tiRpm)*ddepth *
+                                        jac_Gam[i, ii, isr+iz+pup, iv, k]
+                                        )*e1
+                                    jP[i, ii, iv, k] = (
+                                        jP[i, ii, iv, k]*p1 +
+                                        P[i, ii, iv]*jp1)
+
+                                P[i, ii, iv] *= p1
+
+                    # If rec/src NOT in first/last layer (up/down)
+                    if isr+iz != last:
+                        ddepth = depth[isr+iz+1] - depth[isr+iz]
+                        for i in range(nfreq):
+                            for ii in range(noff):
+                                for iv in range(nlambda):
+                                    tiRpm = Rpm[i, ii, iz, iv]
+                                    piGam2 = Gam[i, ii, isr+iz, iv]
+                                    e1 = np.exp(-2*piGam2 * ddepth)
+                                    p1 = 1 + tiRpm*e1
+
+                                    # Derivative before P is updated.
+                                    for k in range(nlayer_res):
+                                        jp1 = (
+                                            jRpm[i, ii, iz, iv, k] -
+                                            2*ddepth*tiRpm *
+                                            jac_Gam[i, ii, isr+iz, iv, k]
+                                            )*e1
+                                        jP[i, ii, iv, k] = (
+                                            jP[i, ii, iv, k] -
+                                            P[i, ii, iv]*jp1/p1)/p1
+
+                                    P[i, ii, iv] /= p1
+
+        # Store P in Pu/Pd
+        if up:
+            Pu = P
+            jPu = jP
+        else:
+            Pd = P
+            jPd = jP
+
+    # Return fields (up- and downgoing)
+    return Pu, Pd, jPu, jPd
 
 
 @nb.njit(**_numba_setting)
