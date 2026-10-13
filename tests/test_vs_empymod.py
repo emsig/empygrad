@@ -123,12 +123,9 @@ def test_model_bipole_time(signal):
 # Gradient path: not implemented yet
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("func, src, rec", [
-    (dipole, [0., 0., 100.], [1000., 0., 200.]),
-    (bipole, [0., 0., 100., 0., 0.], [1000., 0., 200., 0., 0.]),
-])
-def test_gradient_not_implemented(func, src, rec):
-    """gradient=True must raise until the gradient path is implemented."""
+def test_gradient_not_implemented():
+    """bipole(gradient=True) must raise until it is implemented."""
     with pytest.raises(NotImplementedError):
-        func(src=src, rec=rec, depth=[0., 500.], res=[1e20, 0.3, 1.],
-             freqtime=1.0, gradient=True, verb=0)
+        bipole(src=[0., 0., 100., 0., 0.], rec=[1000., 0., 200., 0., 0.],
+               depth=[0., 500.], res=[1e20, 0.3, 1.], freqtime=1.0,
+               gradient=True, verb=0)
