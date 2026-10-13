@@ -1,11 +1,12 @@
 """
-Finite-difference reference for the `dipole(..., gradient=True)` tests.
+Finite-difference reference for the `dipole`/`bipole(..., gradient=True)`
+tests.
 
 The Jacobian w.r.t. res is compared with central finite differences of
-`empymod.dipole`, computed with the same settings (Hankel and Fourier
-transforms, loops, xdirect). The analytical Jacobian differentiates the same
-discretized operator, so they agree up to the truncation and round-off error
-of the FD.
+`empymod.dipole` (or `empymod.bipole`), computed with the same settings
+(Hankel and Fourier transforms, loops, xdirect). The analytical Jacobian
+differentiates the same discretized operator, so they agree up to the
+truncation and round-off error of the FD.
 """
 import numpy as np
 from numpy.testing import assert_allclose
@@ -13,8 +14,8 @@ from numpy.testing import assert_allclose
 import empymod
 
 
-def fd_res(model, h=1e-4, **kwargs):
-    """Fourth-order central FD of empymod.dipole w.r.t. res.
+def fd_res(model, h=1e-4, func=empymod.dipole, **kwargs):
+    """Fourth-order central FD of `func` (empymod.dipole) w.r.t. res.
 
     Returns an array of shape EM.shape + (nlayer, ). The step is relative,
     h*res[k], to cover the large range of res. The fourth order allows a
@@ -31,12 +32,13 @@ def fd_res(model, h=1e-4, **kwargs):
             r = res.copy()
             r[k] += fact*dh
             inp = {**model, 'res': r}
-            em.append(np.asarray(empymod.dipole(**inp, verb=0, **kwargs)))
+            em.append(np.asarray(func(**inp, verb=0, **kwargs)))
         cols.append((-em[0] + 8*em[1] - 8*em[2] + em[3])/(12*dh))
     return np.stack(cols, axis=-1)
 
 
-def assert_jac_fd(J, model, h=1e-4, rtol=1e-6, **kwargs):
+def assert_jac_fd(J, model, h=1e-4, rtol=1e-6, func=empymod.dipole,
+                  **kwargs):
     """Assert that J matches the central FD w.r.t. res, column by column.
 
     The absolute tolerance per column k is the larger of
@@ -47,8 +49,8 @@ def assert_jac_fd(J, model, h=1e-4, rtol=1e-6, **kwargs):
       over the filter). For sensitive columns this floor is ~1e3 eps/h, which
       is negligible.
     """
-    fd = fd_res(model, h, **kwargs)
-    EM = np.asarray(empymod.dipole(**model, verb=0, **kwargs))
+    fd = fd_res(model, h, func, **kwargs)
+    EM = np.asarray(func(**model, verb=0, **kwargs))
     res = np.asarray(model['res'], dtype=float)
     assert J.shape == EM.shape + (res.size, )
     for k in range(res.size):
