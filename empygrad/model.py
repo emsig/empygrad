@@ -817,18 +817,16 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     gradient : bool, default: False
         If True, additionally return the Jacobian with respect to the layer
         resistivities, using the analytical derivative eq. (2.5)–(2.101),
-        equations_public.pdf. Not yet implemented.
+        equations_public.pdf. The function then returns ``(EM, J)``, where
+        ``J`` is an ndarray of shape ``EM.shape + (nlayer, )``, and
+        ``J[..., k]`` is the derivative of EM with respect to ``res[k]``.
+
+        For ``ht='dlf'``, the Jacobian uses the same DLF as EM (standard,
+        lagged, or splined); for ``ht='qwe'`` and ``ht='quad'``, it uses the
+        default DLF. Not implemented for a user-defined ``res`` dict nor for
+        a ``bandpass`` function.
     """
-    def _run_wavenumber(eH, eV, zH, zV, lmbd, jH, jV, jzH, jzV):
-        """Collect kernel columns; eq. (2.41), equations_public.pdf."""
-        raise NotImplementedError()
-
-    def _dlf_cols(jPJ0, jPJ1, jPJ0b, lmbd, off_arr, af, dest):
-        """Transform Jacobian columns; eq. (2.41), equations_public.pdf."""
-        raise NotImplementedError()
-
-    if gradient:
-        raise NotImplementedError("gradient=True is not implemented yet.")
+    jac_params = _parse_jac(gradient)
 
     # Get kwargs with defaults.
     out = get_kwargs(
@@ -839,6 +837,13 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
         [2, 'dlf', {}, 'dlf', {}, False, None, True, None], kwargs,
     )
     verb, ht, htarg, ft, ftarg, xdirect, loop, squeeze, bandpass = out
+
+    if jac_params is not None and (
+            isinstance(res, dict) or
+            (isinstance(bandpass, dict) and 'func' in bandpass)):
+        raise NotImplementedError(
+            "gradient=True is not implemented for a user-defined `res` dict "
+            "nor for a `bandpass` function.")
 
     # === 1.  LET'S START ============
     t0 = printstartfinish(verb)
@@ -898,6 +903,12 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
            loop_freq, loop_off)
     EM, kcount, conv = fem(*inp)
 
+    # Jacobian w.r.t. res, shape (nfreq, noff, nlayer)
+    if jac_params is not None:
+        jac_etaH, jac_etaV, _ = _stacked_eta_seeds(
+            jac_params, etaH, res, aniso, freq)
+        jEM = _fem_jac_columns(*inp, jac_etaH, jac_etaV)
+
     # In case of QWE/QUAD, print Warning if not converged
     conv_warning(conv, htarg, 'Hankel', verb)
 
@@ -908,6 +919,10 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     # Do f->t transform if required
     if signal is not None:
         EM, conv = tem(EM, off, freq, time, signal, ft, ftarg)
+        if jac_params is not None:  # The f->t transform is linear.
+            jEM = np.stack([tem(jEM[..., k], off, freq, time, signal, ft,
+                                ftarg)[0] for k in range(jEM.shape[-1])],
+                           axis=-1)
 
         # In case of QWE/QUAD, print Warning if not converged
         conv_warning(conv, ftarg, 'Fourier', verb)
@@ -917,8 +932,16 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     if squeeze:
         EM = np.squeeze(EM)
 
+    # Reshape the Jacobian such that J[..., k] has the shape of EM
+    if jac_params is not None:
+        jEM = jEM.reshape((-1, nrec, nsrc, jEM.shape[-1]), order='F')
+        jEM = jEM.reshape(EM.shape + (jEM.shape[-1], ))
+
     # === 4.  FINISHED ============
     printstartfinish(verb, t0, kcount)
+
+    if jac_params is not None:
+        return EMArray(EM), jEM
 
     return EMArray(EM)
 
@@ -998,13 +1021,108 @@ def _stacked_eta_seeds(eta_params, etaH, res, aniso, freq):
 
 
 def _fem_jac_columns(ab, off, angle, zsrc, zrec, lsrc, lrec, depth, freq,
-                     etaH, etaV, zetaH, zetaV, xdir, isfullspace,
-                     msrc, mrec, seeds, dlf_filt):
-    r"""Jacobian of the frequency-domain field for a single ``ab`` (bipole).
+                     etaH, etaV, zetaH, zetaV, xdirect, isfullspace, ht, htarg,
+                     msrc, mrec, loop_freq, loop_off, jac_etaH, jac_etaV):
+    r"""Return the Jacobian of the frequency-domain response.
 
-    Resistivity Jacobian: eq. (2.41), (2.75), (2.84), equations_public.pdf.
+    Mirrors :func:`empymod.model.fem`, with the seeds ``jac_etaH`` and
+    ``jac_etaV``, shape (nfreq, nlayer, nparam), of
+    :func:`_stacked_eta_seeds` as additional input. Returns ``jfEM`` of
+    shape (nfreq, noff, nparam): the derivative of the Hankel transform is the
+    Hankel transform of the derivative, eq. (2.40), equations_public.pdf, for
+    each parameter column.
+
+    Two differences with :func:`empymod.model.fem`:
+
+    - The derivative of the analytical direct field is only added if src and
+      rec are in the same layer, and the wavenumber-domain part is always
+      computed, also for a full-space: the derivatives of the reflection
+      coefficients do not vanish in a full-space. (For a full-space with
+      lsrc != lrec, the wavenumber-domain part contains the full field.)
+    - For ``ht='qwe'`` and ``ht='quad'``, the default DLF is used.
+
     """
-    raise NotImplementedError()
+    # Preallocate array
+    jfEM = np.zeros((freq.size, off.size, jac_etaH.shape[-1]),
+                    dtype=etaH.dtype)
+
+    # If <ab> = 36 (or 63), fEM-field is zero
+    if ab in [36, ]:
+        return jfEM
+
+    # Get full-space-solution if xdirect=True and src and rec are in the same
+    # layer.
+    if xdirect and lsrc == lrec:
+        jfEM += kernel.fullspace(off, angle, zsrc, zrec, etaH[:, lrec],
+                                 etaV[:, lrec], zetaH[:, lrec], zetaV[:, lrec],
+                                 ab, msrc, mrec, jac_etaH[:, lrec, :],
+                                 jac_etaV[:, lrec, :])[1]
+
+    # If `xdirect = None` we set it here to True, so it is NOT calculated in
+    # the wavenumber domain. (Only reflected fields are returned.)
+    if xdirect is None:
+        xdir = True
+    else:
+        xdir = xdirect
+
+    # The Jacobian is always computed with DLF.
+    if ht != 'dlf':
+        _, htarg = check_hankel('dlf', {}, 0)
+
+    # Get angle dependent factors
+    ang_fact = kernel.angle_factor(angle, ab, msrc, mrec)
+
+    if loop_freq:
+        for i in range(freq.size):
+            jfEM[None, i, :] += _hankel_dlf_jac(
+                zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab,
+                etaH[None, i, :], etaV[None, i, :], zetaH[None, i, :],
+                zetaV[None, i, :], xdir, htarg, msrc, mrec,
+                jac_etaH[None, i], jac_etaV[None, i])
+    elif loop_off:
+        for i in range(off.size):
+            jfEM[:, None, i] += _hankel_dlf_jac(
+                zsrc, zrec, lsrc, lrec, off[None, i], ang_fact[None, i],
+                depth, ab, etaH, etaV, zetaH, zetaV, xdir, htarg, msrc, mrec,
+                jac_etaH, jac_etaV)
+    else:
+        jfEM += _hankel_dlf_jac(
+            zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab, etaH, etaV,
+            zetaH, zetaV, xdir, htarg, msrc, mrec, jac_etaH, jac_etaV)
+
+    return jfEM
+
+
+def _hankel_dlf_jac(zsrc, zrec, lsrc, lrec, off, ang_fact, depth, ab, etaH,
+                    etaV, zetaH, zetaV, xdirect, htarg, msrc, mrec, jac_etaH,
+                    jac_etaV):
+    r"""Return the Jacobian of :func:`empymod.transform.hankel_dlf`.
+
+    Mirrors :func:`empymod.transform.hankel_dlf`: the derivatives jPJ0, jPJ1,
+    and jPJ0b of :func:`empygrad.kernel.wavenumber` are transformed with the
+    same DLF as the primal, one parameter column at a time; eq. (2.40),
+    equations_public.pdf. Returns ``jfEM`` of shape (nfreq, noff, nparam).
+
+    """
+    # Compute required lambdas for given Hankel-filter-base
+    lambd, int_pts = transform.get_dlf_points(
+        htarg['dlf'], off, htarg['pts_per_dec'])
+
+    # Call the kernel
+    jPJ = kernel.wavenumber(
+        zsrc, zrec, lsrc, lrec, depth, etaH, etaV, zetaH, zetaV, lambd, ab,
+        xdirect, msrc, mrec, jac_etaH, jac_etaV)[3:]
+
+    # Carry out the dlf for each parameter column
+    jfEM = np.zeros((etaH.shape[0], off.size, jac_etaH.shape[-1]),
+                    dtype=etaH.dtype)
+    for k in range(jac_etaH.shape[-1]):
+        jPJk = tuple(None if j is None else j[..., k] for j in jPJ)
+        jfEM[..., k] = transform.dlf(
+            jPJk, lambd, off, htarg['dlf'], htarg['pts_per_dec'],
+            ang_fact=ang_fact, ab=ab, int_pts=int_pts)
+
+    return jfEM
 
 
 def _build_bipole_jac_seeds(jac_params, etaH, res, aniso, freq, n_interfaces):
