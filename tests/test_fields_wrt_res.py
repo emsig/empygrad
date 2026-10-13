@@ -1,0 +1,152 @@
+"""
+Tests for the Jacobian extension of `empygrad.kernel.fields`.
+
+The primal Pu, Pd must equal `empymod.kernel.fields`. The derivatives
+d(Pu)/d(res), d(Pd)/d(res), eq. (2.44)–(2.74) in equations_public.pdf, are
+validated against central finite differences of the empymod reflections and
+fields, with the seeds of `_stacked_eta_seeds`, `_fill_jac_Gam_TM/TE`, and
+`reflections` as input.
+"""
+import numpy as np
+import pytest
+from numpy.testing import assert_allclose
+
+from empymod import kernel as empymod_kernel
+from empymod.utils import check_frequency
+
+from empygrad.kernel import (
+    fields, reflections, _fill_jac_Gam_TM, _fill_jac_Gam_TE)
+from empygrad.model import _stacked_eta_seeds
+
+
+RES = np.array([2e14, 0.3, 1., 50., 10., 5.])
+ANISO = np.array([1., 1.5, 2., 3., 1.2, 1.])
+DEPTH = np.array([-np.inf, 0., 200., 500., 1000., 1300.])
+FREQ = np.array([0.1, 10.0])
+EPERM = np.array([1., 1., 5., 10., 2., 1.])
+LAMBD = np.array([[1e-4, 1e-3, 1e-2, 1e-1, 1.],
+                  [2e-4, 3e-3, 5e-2, 7e-1, 3.]])
+
+# (lsrc, lrec, zsrc), covering all branches of `fields`:
+LAYERS = [
+    (0, 0, -50.),    # same layer, top layer
+    (5, 5, 1400.),   # same layer, bottom layer
+    (2, 2, 300.),    # same layer, in between
+    (0, 3, -50.),    # rec below src, src in top layer
+    (1, 4, 100.),    # rec below src, nlsr > 2
+    (3, 4, 700.),    # rec below src, src in last-but-one layer below
+    (4, 1, 1100.),   # rec above src, nlsr > 2
+    (5, 2, 1400.),   # rec above src, src in bottom layer
+    (2, 1, 300.),    # rec above src, adjacent layer
+]
+
+# (TM, mm): mm = magnetic source and receiver.
+MODES = [(True, False), (False, False), (True, True), (False, True)]
+
+
+def _eta_zeta(res):
+    """Return etaH, etaV, zetaH, zetaV as computed by empymod."""
+    nlay = len(res)
+    _, etaH, etaV, zetaH, zetaV = check_frequency(
+        FREQ, res, ANISO, EPERM, EPERM, np.ones(nlay), np.ones(nlay), 0)
+    return etaH, etaV, zetaH, zetaV
+
+
+def _primal(res, TM, mm):
+    """Return e_zH, Gam as computed in `empymod.kernel.greenfct`."""
+    etaH, etaV, zetaH, zetaV = _eta_zeta(res)
+    if mm:  # MM => EE: switch eta and zeta.
+        etaH, zetaH = -zetaH, -etaH
+        etaV, zetaV = -zetaV, -etaV
+    if TM:
+        e_zH, e_zV, z_eH = etaH, etaV, zetaH
+    else:
+        e_zH, e_zV, z_eH = zetaH, zetaV, etaH
+    h_div_v = (e_zH/e_zV)[:, None, :, None]
+    h_times_h = (z_eH*e_zH)[:, None, :, None]
+    Gam = np.sqrt(h_div_v*LAMBD[None, :, None, :]**2 + h_times_h)
+    return e_zH, Gam
+
+
+def _seeds(TM, mm):
+    """Return jac_e_zH, jac_Gam w.r.t. res (pre-swap seeds, as the kernel)."""
+    etaH, etaV, zetaH, zetaV = _eta_zeta(RES)
+    jac_etaH, jac_etaV, _ = _stacked_eta_seeds(
+        ['res'], etaH, RES, ANISO, FREQ)
+    jac_zero = np.zeros_like(jac_etaH)
+
+    _, Gam = _primal(RES, TM, mm)
+    jac_Gam = np.zeros(Gam.shape + (RES.size, ), dtype=Gam.dtype)
+    if TM != mm:  # TM non-MM and TE-MM
+        _fill_jac_Gam_TM(jac_Gam, Gam, LAMBD, etaH, etaV, zetaH,
+                         jac_etaH, jac_etaV, jac_zero)
+    else:  # TE non-MM and TM-MM
+        _fill_jac_Gam_TE(jac_Gam, Gam, LAMBD, etaH, zetaH, zetaV,
+                         jac_etaH, jac_zero, jac_zero)
+
+    # e_zH is etaH (TM), zetaH (TE), -zetaH (TM-MM), or -etaH (TE-MM).
+    if TM and not mm:
+        jac_e_zH = jac_etaH
+    elif not TM and mm:
+        jac_e_zH = -jac_etaH
+    else:
+        jac_e_zH = jac_zero
+    return jac_e_zH, jac_Gam
+
+
+def _run(TM, mm, ab, lsrc, lrec, zsrc):
+    """Return Pu, Pd, jPu, jPd of empygrad.kernel.fields."""
+    e_zH, Gam = _primal(RES, TM, mm)
+    jac_e_zH, jac_Gam = _seeds(TM, mm)
+    nlay = RES.size
+    Rp, Rm, jRp, jRm = reflections(
+        DEPTH, e_zH, Gam, lrec, lsrc, jac_e_zH, jac_Gam,
+        np.zeros((nlay-1, nlay)))
+    return fields(DEPTH, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM,
+                  jRp, jRm, jac_Gam, np.zeros((3, nlay)))
+
+
+def _empymod(res, TM, mm, ab, lsrc, lrec, zsrc):
+    """Return Pu, Pd of empymod's reflections and fields."""
+    e_zH, Gam = _primal(res, TM, mm)
+    Rp, Rm = empymod_kernel.reflections(DEPTH, e_zH, Gam, lrec, lsrc)
+    return empymod_kernel.fields(
+        DEPTH, Rp, Rm, Gam, lrec, lsrc, zsrc, ab, TM)
+
+
+@pytest.mark.parametrize("lsrc, lrec, zsrc", LAYERS)
+@pytest.mark.parametrize("TM, mm", MODES)
+@pytest.mark.parametrize("ab", [11, 13])
+def test_primal_matches_empymod(ab, TM, mm, lsrc, lrec, zsrc):
+    """Pu, Pd must equal empymod's fields."""
+    Pu_ref, Pd_ref = _empymod(RES, TM, mm, ab, lsrc, lrec, zsrc)
+    Pu, Pd, jPu, jPd = _run(TM, mm, ab, lsrc, lrec, zsrc)
+
+    assert_allclose(Pu, Pu_ref, rtol=1e-12, atol=0)
+    assert_allclose(Pd, Pd_ref, rtol=1e-12, atol=0)
+    assert jPu.shape == Pu.shape + (RES.size, )
+    assert jPd.shape == Pd.shape + (RES.size, )
+
+
+@pytest.mark.parametrize("lsrc, lrec, zsrc", LAYERS)
+@pytest.mark.parametrize("TM, mm", MODES)
+@pytest.mark.parametrize("ab", [11, 13])
+def test_jacobian_vs_fd(ab, TM, mm, lsrc, lrec, zsrc):
+    """jPu, jPd must match central finite differences w.r.t. res."""
+    _, _, jPu, jPd = _run(TM, mm, ab, lsrc, lrec, zsrc)
+
+    for k in range(RES.size):
+        h = 1e-6*RES[k]
+        rp, rm = RES.copy(), RES.copy()
+        rp[k] += h
+        rm[k] -= h
+        Pu_p, Pd_p = _empymod(rp, TM, mm, ab, lsrc, lrec, zsrc)
+        Pu_m, Pd_m = _empymod(rm, TM, mm, ab, lsrc, lrec, zsrc)
+
+        # Column k is the derivative w.r.t. res[k]. The absolute tolerance
+        # is the round-off floor of the FD (relevant for the air layer).
+        for jac, fd, P in [(jPu[..., k], (Pu_p - Pu_m)/(2*h), Pu_p),
+                           (jPd[..., k], (Pd_p - Pd_m)/(2*h), Pd_p)]:
+            atol = max(1e-8*np.abs(fd).max(),
+                       1e2*np.finfo(float).eps*np.abs(P).max()/h)
+            assert_allclose(jac, fd, rtol=1e-6, atol=atol)
