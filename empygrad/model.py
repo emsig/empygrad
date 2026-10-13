@@ -923,20 +923,78 @@ def dipole(src, rec, depth, res, freqtime, signal=None, ab=11, aniso=None,
     return EMArray(EM)
 
 
-def _parse_jac(jac):
-    r"""Normalise the ``jac`` argument to ``None`` or a list of strings.
+def _parse_jac(gradient):
+    r"""Normalise the ``gradient`` argument to ``None`` or a list of strings.
 
-    Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
+    Parameters
+    ----------
+    gradient : bool
+        The public ``gradient`` argument of :func:`dipole`/:func:`bipole`.
+
+    Returns
+    -------
+    jac_params : None or list of str
+        ``None`` if ``gradient`` is False; otherwise the ordered list of
+        parameters to differentiate with respect to (``['res']``).
     """
-    raise NotImplementedError()
+    if not isinstance(gradient, (bool, np.bool_)):
+        raise TypeError(
+            f"`gradient` must be True or False; provided: {gradient!r}.")
+    if not gradient:
+        return None
+    return sorted(_ALL_JAC_PARAMS)
 
 
 def _stacked_eta_seeds(eta_params, etaH, res, aniso, freq):
     r"""Compute stacked d(etaH, etaV)/d(param) seed matrices.
 
-    Resistivity Jacobian: eq. (2.5)–(2.6), equations_public.pdf.
+    Parameters
+    ----------
+    eta_params : list of str
+        Ordered subset of ``_ETA_TYPE_PARAMS`` to include.
+    etaH : complex ndarray, shape (nfreq, nlayer)
+        Primal etaH — used only to read nfreq, nlayer, and dtype.
+    res, aniso : 1-D float arrays, length nlayer
+        Layer resistivities and anisotropy ratios (after ``check_model``).
+    freq : 1-D float array, length nfreq
+        Frequencies (Hz).
+
+    Returns
+    -------
+    jac_etaH, jac_etaV : complex ndarray, shape (nfreq, nlayer, n_total)
+        Stacked seed matrices.  ``n_total = nlayer * len(eta_params)``.
+    param_slices : dict
+        Maps each parameter name to its ``slice`` in the last axis.
+
+    Resistivity Jacobian: eq. (2.5)–(2.6) and (2.102), equations_public.pdf.
     """
-    raise NotImplementedError()
+    nfreq, nlayer = etaH.shape
+    res = np.asarray(res, dtype=float)
+    aniso = np.asarray(aniso, dtype=float)
+    idx = np.arange(nlayer)
+
+    seeds_H, seeds_V, param_slices = [], [], {}
+    col = 0
+
+    for p in eta_params:
+        j_H = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
+        j_V = np.zeros((nfreq, nlayer, nlayer), dtype=etaH.dtype)
+
+        # p == 'res'; eq. (2.102), equations_public.pdf:
+        # etaH = 1/res + iw*eps0*epermH  => d(etaH)/d(res) = -1/res^2
+        # etaV = 1/(res*aniso^2) + iw*eps0*epermV
+        #                        => d(etaV)/d(res) = -1/(res^2*aniso^2)
+        j_H[:, idx, idx] = -1.0 / res**2
+        j_V[:, idx, idx] = -1.0 / (res**2 * aniso**2)
+
+        seeds_H.append(j_H)
+        seeds_V.append(j_V)
+        param_slices[p] = slice(col, col + nlayer)
+        col += nlayer
+
+    jac_etaH = np.concatenate(seeds_H, axis=2)
+    jac_etaV = np.concatenate(seeds_V, axis=2)
+    return jac_etaH, jac_etaV, param_slices
 
 
 def _fem_jac_columns(ab, off, angle, zsrc, zrec, lsrc, lrec, depth, freq,
